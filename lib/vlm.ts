@@ -55,6 +55,7 @@ export type VlmInspectionResult = {
   summary: string;
   findings: VlmFinding[];
   latencyMs: number;
+  rawOutput?: string;
 };
 
 const MAX_FINDINGS = 100;
@@ -185,6 +186,19 @@ export function parseVlmResponse(payload: unknown, request: VlmInspectionRequest
 
 export type HttpVlmAdapterConfig = { endpoint: string; model: string; timeoutMs?: number; fetchImpl?: typeof fetch };
 
+export class VlmAdapterError extends Error {
+  rawOutput?: string;
+  status?: number;
+  latencyMs?: number;
+  constructor(message: string, details: { rawOutput?: string; status?: number; latencyMs?: number } = {}) {
+    super(message);
+    this.name = "VlmAdapterError";
+    this.rawOutput = details.rawOutput;
+    this.status = details.status;
+    this.latencyMs = details.latencyMs;
+  }
+}
+
 export function createHttpVlmAdapter(config: HttpVlmAdapterConfig) {
   if (!config.endpoint || !/^https?:\/\//.test(config.endpoint)) throw new Error("VLM adapter endpoint must be an http(s) URL.");
   if (!config.model) throw new Error("VLM adapter model is required.");
@@ -203,9 +217,26 @@ export function createHttpVlmAdapter(config: HttpVlmAdapterConfig) {
           body: JSON.stringify({ protocolVersion: VLM_PROTOCOL_VERSION, model: config.model, promptVersion, prompt: buildInspectionPrompt({ ...request, promptVersion }), request }),
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error(`VLM adapter returned HTTP ${response.status}.`);
+        if (!response.ok) {
+          let details = "";
+          try {
+            const errorPayload: unknown = await response.json();
+            if (errorPayload && typeof errorPayload === "object" && typeof (errorPayload as Record<string, unknown>).error === "string") details = ` ${(errorPayload as Record<string, string>).error}`;
+          } catch { /* Keep the HTTP status when the gateway body is not JSON. */ }
+          throw new VlmAdapterError(`VLM adapter returned HTTP ${response.status}.${details}`, { status: response.status });
+        }
         const payload = await response.json();
-        return parseVlmResponse(payload, { ...request, promptVersion }, config.model, Date.now() - started);
+        try {
+          const result = parseVlmResponse(payload, { ...request, promptVersion }, config.model, Date.now() - started);
+          if (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).output === "string") result.rawOutput = (payload as Record<string, string>).output;
+          return result;
+        } catch (cause) {
+          const rawOutput = payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).output === "string"
+            ? (payload as Record<string, string>).output.slice(0, 8_000)
+            : undefined;
+          const message = cause instanceof Error ? cause.message : "VLM response validation failed.";
+          throw new VlmAdapterError(message, { rawOutput, latencyMs: Date.now() - started });
+        }
       } catch (cause) {
         if (cause instanceof Error && cause.name === "AbortError") throw new Error("VLM inspection timed out.");
         throw cause instanceof Error ? cause : new Error("VLM inspection failed.");

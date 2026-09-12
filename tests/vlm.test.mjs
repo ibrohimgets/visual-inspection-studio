@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildInspectionPrompt, buildZeroShotPrompt, createHttpVlmAdapter, parseVlmResponse, validateInspectionRequest } from "../lib/vlm.ts";
+import { buildInspectionPrompt, buildZeroShotPrompt, createHttpVlmAdapter, parseVlmResponse, validateInspectionRequest, VlmAdapterError } from "../lib/vlm.ts";
 
 const task = {
   id: "dspcbsd-plus",
@@ -69,4 +69,18 @@ test("HTTP adapter sends the protocol and parses the provider response", async (
   assert.equal(sent.model, "local-test-vlm");
   assert.equal(sent.request.mode, "zero-shot");
   assert.equal(result.model, "local-test-vlm");
+});
+
+test("HTTP adapter preserves malformed local-model output for failure analysis", async () => {
+  const adapter = createHttpVlmAdapter({
+    endpoint: "http://127.0.0.1:8000/inspect",
+    model: "local-test-vlm",
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ output: "not-json" }) }),
+  });
+  await assert.rejects(() => adapter.inspect(request), error => {
+    assert.ok(error instanceof VlmAdapterError);
+    assert.equal(error.rawOutput, "not-json");
+    assert.ok(Number.isFinite(error.latencyMs));
+    return true;
+  });
 });

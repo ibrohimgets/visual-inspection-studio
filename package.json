@@ -17,6 +17,7 @@
     "test": "node --test tests/*.test.mjs",
     "evaluate": "node scripts/evaluate.mjs",
     "prepare:dataset": "node scripts/prepare-dspcbsd.mjs",
+    "vlm:validation": "node scripts/run-vlm-validation.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

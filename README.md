@@ -112,11 +112,14 @@ pretending that a model score is a calibrated probability. Responses must use
 the frozen DsPCBSD+ labels, pixel-space boxes, evidence, and explicit
 uncertainty reasons. Every finding is routed to human review by default.
 
-This milestone intentionally does **not** bundle a hosted model, make up
-defect predictions, or change the browser YOLOX workflow. The next step is a
-local open-model gateway that implements this contract; only then can we record
-real zero/few-shot predictions against the frozen test split and measure
-localization, calibration, abstention, and latency.
+The first local provider is the loopback-only
+[SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct)
+gateway documented in [`vlm/README.md`](vlm/README.md). It is a general
+multimodal model rather than a PCB-defect model, so malformed responses and
+weak localization are expected failure cases. The validation runner records
+those failures instead of repairing them into predictions. The browser YOLOX
+workflow remains unchanged, and the frozen test split will not be run until a
+small validation probe produces usable structured outputs.
 
 ## Local development
 
