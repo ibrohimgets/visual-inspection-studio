@@ -65,4 +65,12 @@ operating threshold. This is not COCO mAP@[.5:.95].
 
 The measured first run is recorded in
 [`experiments/2026-09-12-yolox-nano-validation.md`](experiments/2026-09-12-yolox-nano-validation.md).
-No Terra calls or test-set predictions are part of this milestone.
+No Terra calls or test-set predictions are part of that milestone.
+
+The next validation-only milestone routes detector scores from 0.29 through
+0.5999 to batched Terra crop verification. Its full protocol and negative
+result are recorded in
+[`experiments/2026-09-12-hybrid-validation.md`](experiments/2026-09-12-hybrid-validation.md):
+Terra did not improve the automatic detector, while reliable human routing
+would still send nearly every ambiguous proposal to review. The frozen test
+split remains untouched.

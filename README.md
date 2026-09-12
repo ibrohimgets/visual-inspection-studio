@@ -152,6 +152,24 @@ The existing browser-local YOLOX object-detection workflow remains unchanged.
 Terra verification and human-review routing are deliberately deferred to the
 next milestone so the detector-only baseline remains independently auditable.
 
+## Phase 4: validation-only hybrid routing
+
+The full validation split has now been used to test selective Terra verification
+for only the detector's 0.29–0.60 uncertainty band. The result is deliberately
+reported even though it is negative: detector + Terra did not beat detector
+only. The safe validation-selected Terra cutoff suppresses almost every VLM
+action, leaving the same 69.86% precision, 66.19% recall, and 67.98% F1 while
+adding 105 successful API calls and roughly $1.76–$1.80 of measured/estimated
+cost.
+
+Human routing can lift automatic precision to 85.21%, but it queues 836 of 839
+ambiguous proposals across 49.24% of validation images. A perfect ground-truth
+reviewer simulation reaches 80.54% F1, but that is explicitly an oracle ceiling,
+not measured human performance. The protocol, routing tradeoffs, latency, cost,
+and limitations are documented in
+[`detector/experiments/2026-09-12-hybrid-validation.md`](detector/experiments/2026-09-12-hybrid-validation.md).
+The frozen test split remains sealed.
+
 ## Local development
 
 ```bash

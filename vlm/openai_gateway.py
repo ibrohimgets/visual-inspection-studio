@@ -67,7 +67,43 @@ def inspection_schema(labels: list[str]) -> dict[str, Any]:
                             "required": ["level", "reasons"],
                             "properties": {
                                 "level": {"type": "string", "enum": ["low", "medium", "high"]},
-                                "reasons": {"type": "array", "items": {"type": "string"}},
+                                "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def proposal_verification_schema(labels: list[str], candidate_ids: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["decisions"],
+        "properties": {
+            "decisions": {
+                "type": "array",
+                "minItems": len(candidate_ids),
+                "maxItems": len(candidate_ids),
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["candidateId", "verdict", "label", "modelScore", "evidence", "uncertainty"],
+                    "properties": {
+                        "candidateId": {"type": "string", "enum": candidate_ids},
+                        "verdict": {"type": "string", "enum": ["confirm", "relabel", "reject", "uncertain"]},
+                        "label": {"type": "string", "enum": labels},
+                        "modelScore": {"type": "number", "minimum": 0, "maximum": 1},
+                        "evidence": {"type": "string", "minLength": 1},
+                        "uncertainty": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["level", "reasons"],
+                            "properties": {
+                                "level": {"type": "string", "enum": ["low", "medium", "high"]},
+                                "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
                             },
                         },
                     },
@@ -97,6 +133,39 @@ class OpenAIGateway:
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_output_tokens = max_output_tokens
+
+    def _request(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        client_request_id = str(uuid.uuid4())
+        started = time.perf_counter()
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "X-Client-Request-Id": client_request_id,
+            },
+            json=body,
+            timeout=self.timeout_seconds,
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise RuntimeError(f"OpenAI returned HTTP {response.status_code} with a non-JSON body") from error
+        if not response.ok:
+            message = payload.get("error", {}).get("message", "request failed") if isinstance(payload, dict) else "request failed"
+            raise RuntimeError(f"OpenAI returned HTTP {response.status_code}: {message}")
+        return payload, {
+            "provider": "openai",
+            "model": payload.get("model", self.model),
+            "responseId": payload.get("id"),
+            "requestId": response.headers.get("x-request-id"),
+            "clientRequestId": client_request_id,
+            "providerLatencyMs": elapsed_ms,
+            "usage": payload.get("usage"),
+            "serviceTier": payload.get("service_tier"),
+            "stored": False,
+        }
 
     def inspect(self, envelope: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         request = envelope.get("request", {})
@@ -134,7 +203,6 @@ class OpenAIGateway:
             query_image,
         ])
 
-        client_request_id = str(uuid.uuid4())
         body = {
             "model": self.model,
             "store": False,
@@ -154,36 +222,63 @@ class OpenAIGateway:
                 "content": content,
             }],
         }
-        started = time.perf_counter()
-        response = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "X-Client-Request-Id": client_request_id,
+        payload, metadata = self._request(body)
+        return output_text(payload), metadata
+
+    def verify_proposals(self, envelope: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        if envelope.get("model") != self.model:
+            raise ValueError(f"gateway is configured for {self.model}")
+        image = envelope.get("image", {})
+        candidates = envelope.get("candidates", [])
+        labels = envelope.get("labels", [])
+        if not isinstance(candidates, list) or not 1 <= len(candidates) <= 8:
+            raise ValueError("candidates must contain between 1 and 8 proposals")
+        if not isinstance(labels, list) or not labels or not all(isinstance(label, str) and label for label in labels):
+            raise ValueError("labels must be a non-empty string array")
+        candidate_ids = [candidate.get("candidateId") for candidate in candidates if isinstance(candidate, dict)]
+        if len(candidate_ids) != len(candidates) or not all(isinstance(candidate_id, str) and candidate_id for candidate_id in candidate_ids) or len(set(candidate_ids)) != len(candidate_ids):
+            raise ValueError("every candidate needs a unique candidateId")
+        rows = []
+        for candidate in candidates:
+            detector_label = candidate.get("detectorLabel")
+            detector_score = candidate.get("detectorScore")
+            if detector_label not in labels or not isinstance(detector_score, (float, int)):
+                raise ValueError("every candidate needs a valid detectorLabel and detectorScore")
+            rows.append(f"{candidate['candidateId']}: detector hypothesis {detector_label}, detector score {detector_score:.4f}")
+        prompt = "\n".join([
+            "You are verifying uncertain PCB defect proposals, not searching the full board.",
+            "The image is a contact sheet. Each panel has a candidate ID and a cyan rectangle marking the detector proposal.",
+            "Inspect every panel independently and return exactly one decision for every candidate ID.",
+            "confirm means the marked region contains the proposed defect class; relabel means a visible defect exists but another allowed class is better; reject means the marked feature is normal material or an artifact; uncertain means the crop cannot support a reliable decision.",
+            "Do not trust the detector hypothesis automatically. modelScore is an uncalibrated confidence in your verdict, not a probability.",
+            "For reject or uncertain, repeat the detector hypothesis in label because the schema requires an allowed label.",
+            "Candidates:",
+            *rows,
+        ])
+        body = {
+            "model": self.model,
+            "store": False,
+            "reasoning": {"effort": self.reasoning_effort},
+            "max_output_tokens": self.max_output_tokens,
+            "text": {
+                "verbosity": "low",
+                "format": {
+                    "type": "json_schema",
+                    "name": "pcb_proposal_verification",
+                    "strict": True,
+                    "schema": proposal_verification_schema(labels, candidate_ids),
+                },
             },
-            json=body,
-            timeout=self.timeout_seconds,
-        )
-        elapsed_ms = round((time.perf_counter() - started) * 1000)
-        try:
-            payload = response.json()
-        except ValueError as error:
-            raise RuntimeError(f"OpenAI returned HTTP {response.status_code} with a non-JSON body") from error
-        if not response.ok:
-            message = payload.get("error", {}).get("message", "request failed") if isinstance(payload, dict) else "request failed"
-            raise RuntimeError(f"OpenAI returned HTTP {response.status_code}: {message}")
-        return output_text(payload), {
-            "provider": "openai",
-            "model": payload.get("model", self.model),
-            "responseId": payload.get("id"),
-            "requestId": response.headers.get("x-request-id"),
-            "clientRequestId": client_request_id,
-            "providerLatencyMs": elapsed_ms,
-            "usage": payload.get("usage"),
-            "serviceTier": payload.get("service_tier"),
-            "stored": False,
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    image_content(image, "proposal contact sheet"),
+                ],
+            }],
         }
+        payload, metadata = self._request(body)
+        return output_text(payload), metadata
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -198,14 +293,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-        if self.path != "/inspect":
-            self._send(404, {"error": "Only POST /inspect is supported."})
+        if self.path not in {"/inspect", "/verify-proposals"}:
+            self._send(404, {"error": "Only POST /inspect and POST /verify-proposals are supported."})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 30 * 1024 * 1024:
                 raise ValueError("request body must be between 1 byte and 30 MB")
-            output, metadata = self.gateway.inspect(json.loads(self.rfile.read(length)))
+            envelope = json.loads(self.rfile.read(length))
+            output, metadata = self.gateway.inspect(envelope) if self.path == "/inspect" else self.gateway.verify_proposals(envelope)
             self._send(200, {"output": output, "metadata": metadata})
         except ValueError as error:
             self._send(400, {"error": str(error)})

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "experiment": "Detector-first uncertainty-aware hybrid routing",
+  "dataset": "DsPCBSD+",
+  "trainingSplit": "train",
+  "targetSplit": "validation",
+  "validationImages": 851,
+  "validationBoxes": 1621,
+  "testSplitAccessed": false,
+  "protocol": {
+    "detectorThreshold": 0.37,
+    "rejectBelow": 0.29,
+    "trustAtOrAbove": 0.6,
+    "ambiguityBand": "[0.29, 0.60)",
+    "bandTargets": {
+      "minimumRecallAtLowerBoundary": 0.7,
+      "minimumPrecisionAtUpperBoundary": 0.85
+    },
+    "ambiguousProposals": 839,
+    "terraBatchSize": 8,
+    "selectedTerraActionThreshold": 0.95,
+    "terraActionPolicy": "Low uncertainty and score >= 0.95; otherwise detector fallback or human review.",
+    "iouThreshold": 0.5
+  },
+  "comparison": {
+    "detectorOnly": {
+      "predictions": 1536,
+      "truePositives": 1073,
+      "falsePositives": 463,
+      "missedDefects": 548,
+      "precision": 0.6985677083333334,
+      "recall": 0.661937075879087,
+      "f1": 0.6797592651251188,
+      "routedMap50": 0.6058147059718598
+    },
+    "detectorPlusTerra": {
+      "predictions": 1536,
+      "truePositives": 1073,
+      "falsePositives": 463,
+      "missedDefects": 548,
+      "precision": 0.6985677083333334,
+      "recall": 0.661937075879087,
+      "f1": 0.6797592651251188,
+      "routedMap50": 0.6058147059718598,
+      "interpretation": "Validation selection suppresses nearly all Terra actions; no improvement over detector-only."
+    },
+    "detectorTerraHumanRoutingBeforeReview": {
+      "predictions": 933,
+      "truePositives": 795,
+      "falsePositives": 138,
+      "missedDefects": 826,
+      "precision": 0.8520900321543409,
+      "recall": 0.4904380012338063,
+      "f1": 0.6225528582615506,
+      "routedMap50": 0.47483914381627834,
+      "humanReviewProposals": 836,
+      "humanReviewProposalRateWithinAmbiguityBand": 0.9964243146603099,
+      "humanReviewImages": 419,
+      "humanReviewImageRate": 0.49236192714453586
+    },
+    "validationOracleReviewCeiling": {
+      "simulated": true,
+      "predictions": 1324,
+      "truePositives": 1186,
+      "falsePositives": 138,
+      "missedDefects": 435,
+      "precision": 0.8957703927492447,
+      "recall": 0.7316471314003702,
+      "f1": 0.8054329371816639,
+      "routedMap50": 0.6974462336583643,
+      "caveat": "Ground truth simulates a perfect reviewer; this is an upper bound, not a measured human result."
+    }
+  },
+  "routing": {
+    "trustedDetectorProposals": 930,
+    "ambiguousProposals": 839,
+    "rejectedLowConfidenceProposals": 16542,
+    "terraDecisions": {
+      "confirm": 669,
+      "relabel": 85,
+      "reject": 55,
+      "uncertain": 30
+    }
+  },
+  "latency": {
+    "detectorWallMs": 19843.393299961463,
+    "successfulTerraSequentialWallMs": 1554356,
+    "successfulTerraBatchMeanMs": 14803.390476190476,
+    "successfulTerraBatchP95Ms": 22573,
+    "successfulTerraBatchMinMs": 6228,
+    "successfulTerraBatchMaxMs": 29845,
+    "measuredSequentialMeanMsPerValidationImage": 1849.8230238542437,
+    "humanReviewTimeIncluded": false
+  },
+  "api": {
+    "successfulCalls": 105,
+    "failedUnmeteredCalls": 1,
+    "inputTokens": 118912,
+    "cachedInputTokens": 3392,
+    "outputTokens": 127728,
+    "totalTokens": 246640,
+    "measuredCostUsd": 1.7644544,
+    "estimatedTotalCostRangeUsd": [1.7644544, 1.7955304],
+    "pricingCheckedAt": "2026-09-12",
+    "pricingSource": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+  },
+  "conclusion": "Terra crop verification did not improve automatic detector performance on validation. Human routing can improve reliability only with a high review burden."
+}
