@@ -56,6 +56,7 @@ python detector/predict_yolox_cpu.py --split validation --batch-size 32 \
   --output reports/local/detector/yolox-nano-pcb/validation-predictions.json
 
 npm run detector:tune
+npm run detector:tune-classes
 ```
 
 Threshold selection maximizes class-aware F1 at IoU 0.5, with deterministic
@@ -66,6 +67,14 @@ operating threshold. This is not COCO mAP@[.5:.95].
 The measured first run is recorded in
 [`experiments/2026-09-12-yolox-nano-validation.md`](experiments/2026-09-12-yolox-nano-validation.md).
 No Terra calls or test-set predictions are part of that milestone.
+
+The class-specific threshold pass is recorded in
+[`experiments/2026-09-12-class-thresholds-validation.md`](experiments/2026-09-12-class-thresholds-validation.md).
+It raises validation precision from 69.86% to 76.97% and F1 from 67.98% to
+70.20%, while recall moves from 66.19% to 64.53%. This is treated as a
+precision-first operating profile rather than a universal model improvement.
+Hard-negative retraining is deferred until the product workflow needs a larger
+accuracy gain; the frozen test split remains untouched.
 
 The next validation-only milestone routes detector scores from 0.29 through
 0.5999 to batched Terra crop verification. Its full protocol and negative

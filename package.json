@@ -1,6 +1,6 @@
 {
   "name": "visual-inspection-studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -20,6 +20,7 @@
     "vlm:validation": "node scripts/run-vlm-validation.mjs",
     "vlm:experiments": "node scripts/run-vlm-experiments.mjs",
     "detector:tune": "node scripts/tune-detector.mjs",
+    "detector:tune-classes": "node scripts/tune-class-thresholds.mjs",
     "hybrid:validation": "node scripts/run-hybrid-validation.mjs",
     "db:generate": "drizzle-kit generate"
   },

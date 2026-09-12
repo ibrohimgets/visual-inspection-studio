@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "experiment": "class-specific-thresholds",
+  "dataset": "DsPCBSD+",
+  "split": "validation",
+  "imageCount": 851,
+  "iouThreshold": 0.5,
+  "proposalFloor": 0.001,
+  "testSplitAccessed": false,
+  "selectionObjective": "micro-F1",
+  "baseline": {
+    "threshold": 0.37,
+    "truePositives": 1073,
+    "falsePositives": 463,
+    "falseNegatives": 548,
+    "precision": 0.6985677083333334,
+    "recall": 0.661937075879087,
+    "f1": 0.6797592651251188,
+    "rankedMap50": 0.6940965892055138,
+    "routedMap50": 0.6058147059718598
+  },
+  "precisionFirst": {
+    "thresholds": {
+      "SH": 0.34,
+      "SP": 0.31,
+      "SC": 0.58,
+      "OP": 0.58,
+      "MB": 0.34,
+      "HB": 0.69,
+      "CS": 0.44,
+      "CFO": 0.35,
+      "BMFO": 0.5
+    },
+    "truePositives": 1046,
+    "falsePositives": 313,
+    "falseNegatives": 575,
+    "precision": 0.7696835908756439,
+    "recall": 0.6452806909315237,
+    "f1": 0.7020134228187919,
+    "routedMap50": 0.5876306520672004
+  }
+}

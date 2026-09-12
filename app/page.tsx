@@ -21,6 +21,17 @@ declare global {
 
 const SAMPLE = { name: "objects-sample.jpg", source: "sample" as const, width: 0, height: 0 };
 type WorkspaceMode = "general" | "surface-defect";
+type BatchStatus = "queued" | "running" | "complete" | "failed";
+type BatchItem = {
+  id: number;
+  name: string;
+  url: string;
+  width: number;
+  height: number;
+  status: BatchStatus;
+  run: Run | null;
+  error: string;
+};
 const modeLabel: Record<WorkspaceMode, string> = {
   general: "General Object Detection",
   "surface-defect": "Surface Defect Inspection",
@@ -46,10 +57,18 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [opening, setOpening] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [activeTab, setActiveTab] = useState("review");
+  const [batch, setBatch] = useState<BatchItem[]>([]);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const batchInputRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const cropRef = useRef<HTMLCanvasElement>(null);
   const workerRef = useRef<Worker | null>(null);
   const blobRef = useRef<string | null>(null);
+  const batchUrlsRef = useRef<string[]>([]);
+  const batchIdRef = useRef(1);
   const revision = useRef(0);
   const uploadRevision = useRef(0);
   const pending = useRef<{ reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null>(null);
@@ -61,6 +80,11 @@ export default function Home() {
   const accepted = items.filter(item => item.review === "accepted").length;
   const dismissed = items.filter(item => item.review === "dismissed").length;
   const reviewed = accepted + dismissed;
+  const completedBatch = batch.filter(item => item.status === "complete" && item.run);
+  const batchDetections = completedBatch.reduce((total, item) => total + (item.run?.detections.filter(detection => detection.confidence * 100 >= threshold).length ?? 0), 0);
+  const batchMeanLatency = completedBatch.length
+    ? completedBatch.reduce((total, item) => total + (item.run?.inferenceMs ?? 0), 0) / completedBatch.length
+    : 0;
 
   function changeMode(next: WorkspaceMode) {
     if (next === mode || !canReplace()) return;
@@ -100,7 +124,39 @@ export default function Home() {
       clearTimeout(pending.current.timer); pending.current.reject(new Error("Workspace closed."));
     }
     if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    batchUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
   }, []);
+
+  useEffect(() => {
+    const canvas = cropRef.current;
+    const source = imageRef.current;
+    if (!canvas || !source || !selected || !ready) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const padding = Math.max(selected.width, selected.height) * 0.55;
+    const x = Math.max(0, selected.x - padding);
+    const y = Math.max(0, selected.y - padding);
+    const right = Math.min(image.width, selected.x + selected.width + padding);
+    const bottom = Math.min(image.height, selected.y + selected.height + padding);
+    const cropWidth = Math.max(1, right - x);
+    const cropHeight = Math.max(1, bottom - y);
+    const scale = Math.min(canvas.width / cropWidth, canvas.height / cropHeight);
+    const drawWidth = cropWidth * scale;
+    const drawHeight = cropHeight * scale;
+    const offsetX = (canvas.width - drawWidth) / 2;
+    const offsetY = (canvas.height - drawHeight) / 2;
+    context.fillStyle = "#171b20";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, x, y, cropWidth, cropHeight, offsetX, offsetY, drawWidth, drawHeight);
+    context.strokeStyle = "#f4b942";
+    context.lineWidth = 3;
+    context.strokeRect(
+      offsetX + (selected.x - x) * scale,
+      offsetY + (selected.y - y) * scale,
+      selected.width * scale,
+      selected.height * scale,
+    );
+  }, [image.height, image.width, ready, selected]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -133,6 +189,7 @@ export default function Home() {
       blobRef.current = url;
       setReady(false); setImageUrl(url);
       setImage({ name: file.name, source: "upload", width: decoded.naturalWidth, height: decoded.naturalHeight });
+      setActiveBatchId(null);
     } catch (cause) {
       URL.revokeObjectURL(url);
       if (ticket === uploadRevision.current) setError(cause instanceof Error && cause.message.includes("megapixels") ? cause.message : "This image could not be decoded. Try a different PNG, JPEG or WebP.");
@@ -147,60 +204,161 @@ export default function Home() {
     setImageUrl("/objects-sample.jpg");
     setImage(imageUrl === "/objects-sample.jpg" ? { ...SAMPLE, width: image.width, height: image.height } : SAMPLE);
     setThreshold(30);
+    setActiveBatchId(null);
   }
+
+  async function chooseBatchFiles(files?: FileList | null) {
+    const selectedFiles = Array.from(files ?? []);
+    if (!selectedFiles.length) return;
+    if (batchRunning) { setError("Wait for the current batch to finish before adding images."); return; }
+    if (batch.length + selectedFiles.length > 12) { setError("A browser batch can contain up to 12 images."); return; }
+    const problem = selectedFiles.map(validateImageFile).find(Boolean);
+    if (problem) { setError(problem); return; }
+    setOpening(true); setError(""); setNotice("");
+    const prepared: BatchItem[] = [];
+    try {
+      for (const file of selectedFiles) {
+        const url = URL.createObjectURL(file);
+        try {
+          const decoded = new Image(); decoded.src = url; await decoded.decode();
+          if (decoded.naturalWidth * decoded.naturalHeight > 40_000_000) throw new Error("Choose images smaller than 40 megapixels.");
+          batchUrlsRef.current.push(url);
+          prepared.push({ id: batchIdRef.current++, name: file.name, url, width: decoded.naturalWidth,
+            height: decoded.naturalHeight, status: "queued", run: null, error: "" });
+        } catch (cause) {
+          URL.revokeObjectURL(url);
+          throw cause;
+        }
+      }
+      setBatch(current => [...current, ...prepared]);
+      setNotice(prepared.length + (prepared.length === 1 ? " image added to the batch." : " images added to the batch."));
+    } catch (cause) {
+      for (const item of prepared) {
+        URL.revokeObjectURL(item.url);
+        batchUrlsRef.current = batchUrlsRef.current.filter(url => url !== item.url);
+      }
+      setError(cause instanceof Error ? cause.message : "One of these images could not be opened.");
+    } finally { setOpening(false); }
+  }
+
+  const inferElement = useCallback(async (
+    element: HTMLImageElement,
+    ticket: number,
+    onStatus: (message: string) => void,
+  ) => {
+    if (pending.current) throw new Error("An inspection is already running.");
+    const started = performance.now();
+    onStatus("Preparing image…");
+    const canvas = document.createElement("canvas");
+    canvas.width = INPUT_SIZE; canvas.height = INPUT_SIZE;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Image processing is unavailable in this browser.");
+    const ratio = Math.min(INPUT_SIZE / element.naturalWidth, INPUT_SIZE / element.naturalHeight);
+    context.fillStyle = "rgb(114,114,114)"; context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
+    context.drawImage(element, 0, 0, Math.floor(element.naturalWidth * ratio), Math.floor(element.naturalHeight * ratio));
+    const data = rgbaToBgr(context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data);
+    const worker = workerRef.current ?? new Worker("/runtime/inference.worker.js", { type: "module" });
+    workerRef.current = worker;
+    const result = await new Promise<{ detections: Detection[]; inferenceMs: number }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        worker.terminate(); workerRef.current = null; pending.current = null;
+        reject(new Error("Detection timed out. Try again or reload the page."));
+      }, 90_000);
+      pending.current = { reject, timer };
+      const finish = () => { clearTimeout(timer); pending.current = null; };
+      worker.onerror = (event) => {
+        console.error("Inference worker failed:", event.message);
+        finish(); worker.terminate(); workerRef.current = null;
+        reject(new Error("The detection engine could not start. Reload the page and try again."));
+      };
+      worker.onmessage = event => {
+        if (ticket !== revision.current) return;
+        if (event.data.type === "status") { onStatus(event.data.message); return; }
+        finish();
+        if (event.data.type === "error") {
+          worker.terminate(); workerRef.current = null; reject(new Error(event.data.message));
+        } else resolve(event.data);
+      };
+      worker.postMessage({ data, width: element.naturalWidth, height: element.naturalHeight }, [data.buffer]);
+    });
+    if (ticket !== revision.current) throw new Error("Detection cancelled.");
+    return { ...result, totalMs: Math.round(performance.now() - started), completedAt: new Date().toISOString() } satisfies Run;
+  }, []);
 
   const runDetection = useCallback(async () => {
     if (mode !== "general") throw new Error("Surface defect inspection is not configured yet. Train and export a domain-specific model before running it.");
-    if (pending.current) throw new Error("An inspection is already running.");
     const element = imageRef.current;
     if (!ready || opening || !element?.naturalWidth) throw new Error("Wait for the image to finish loading.");
     const ticket = ++revision.current;
-    const started = performance.now();
     setError(""); setNotice(""); setPhase("Preparing image…");
     try {
-      const canvas = document.createElement("canvas");
-      canvas.width = INPUT_SIZE; canvas.height = INPUT_SIZE;
-      const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) throw new Error("Image processing is unavailable in this browser.");
-      const ratio = Math.min(INPUT_SIZE / element.naturalWidth, INPUT_SIZE / element.naturalHeight);
-      context.fillStyle = "rgb(114,114,114)"; context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
-      context.drawImage(element, 0, 0, Math.floor(element.naturalWidth * ratio), Math.floor(element.naturalHeight * ratio));
-      const data = rgbaToBgr(context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data);
-      const worker = workerRef.current ?? new Worker("/runtime/inference.worker.js", { type: "module" });
-      workerRef.current = worker;
-      const result = await new Promise<{ detections: Detection[]; inferenceMs: number }>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          worker.terminate(); workerRef.current = null; pending.current = null;
-          reject(new Error("Detection timed out. Try again or reload the page."));
-        }, 90_000);
-        pending.current = { reject, timer };
-        const finish = () => { clearTimeout(timer); pending.current = null; };
-        worker.onerror = (event) => {
-          console.error("Inference worker failed:", event.message);
-          finish(); worker.terminate(); workerRef.current = null;
-          reject(new Error("The detection engine could not start. Reload the page and try again."));
-        };
-        worker.onmessage = event => {
-          if (ticket !== revision.current) return;
-          if (event.data.type === "status") { setPhase(event.data.message); return; }
-          finish();
-          if (event.data.type === "error") {
-            worker.terminate(); workerRef.current = null; reject(new Error(event.data.message));
-          } else resolve(event.data);
-        };
-        worker.postMessage({ data, width: element.naturalWidth, height: element.naturalHeight }, [data.buffer]);
-      });
-      if (ticket !== revision.current) throw new Error("Detection cancelled.");
-      const completed: Run = { ...result, totalMs: Math.round(performance.now() - started), completedAt: new Date().toISOString() };
+      const completed = await inferElement(element, ticket, setPhase);
       setRun(completed); setHiddenClasses([]); setReviewFilter("all");
-      setSelectedId(result.detections.find(item => item.confidence * 100 >= threshold)?.id ?? null);
+      setSelectedId(completed.detections.find(item => item.confidence * 100 >= threshold)?.id ?? null);
+      if (activeBatchId !== null) {
+        setBatch(current => current.map(item => item.id === activeBatchId ? { ...item, status: "complete", run: completed, error: "" } : item));
+      }
       setDirty(false); setPhase("");
       return completed;
     } catch (cause) {
       if (ticket === revision.current) { setError(cause instanceof Error ? cause.message : "Detection failed."); setPhase(""); }
       throw cause;
     }
-  }, [mode, ready, opening, threshold]);
+  }, [activeBatchId, inferElement, mode, ready, opening, threshold]);
+
+  async function runBatch() {
+    if (mode !== "general") { setError("Batch inspection needs a configured detection model."); return; }
+    const candidates = batch.filter(item => item.status === "queued" || item.status === "failed");
+    if (!candidates.length || batchRunning) return;
+    const ticket = ++revision.current;
+    setBatchRunning(true); setError(""); setNotice("");
+    try {
+      for (let index = 0; index < candidates.length; index++) {
+        const item = candidates[index];
+        if (ticket !== revision.current) break;
+        setBatch(current => current.map(entry => entry.id === item.id ? { ...entry, status: "running", error: "" } : entry));
+        try {
+          const element = new Image(); element.src = item.url; await element.decode();
+          const completed = await inferElement(element, ticket, message => setPhase(`Batch ${index + 1}/${candidates.length} · ${message}`));
+          setBatch(current => current.map(entry => entry.id === item.id ? { ...entry, status: "complete", run: completed, error: "" } : entry));
+        } catch (cause) {
+          if (ticket !== revision.current) {
+            setBatch(current => current.map(entry => entry.id === item.id ? { ...entry, status: "queued" } : entry));
+            break;
+          }
+          setBatch(current => current.map(entry => entry.id === item.id ? { ...entry, status: "failed", error: cause instanceof Error ? cause.message : "Inspection failed." } : entry));
+        }
+      }
+      if (ticket === revision.current) setNotice("Batch inspection finished. Open any completed image for manual review.");
+    } finally {
+      setBatchRunning(false); setPhase("");
+    }
+  }
+
+  function openBatchResult(item: BatchItem) {
+    if (!item.run || !canReplace()) return;
+    clearResults();
+    if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    blobRef.current = null;
+    setReady(false); setImageUrl(item.url);
+    setImage({ name: item.name, source: "upload", width: item.width, height: item.height });
+    setRun(item.run); setActiveBatchId(item.id);
+    setSelectedId(item.run.detections.find(detection => detection.confidence * 100 >= threshold)?.id ?? null);
+    setActiveTab("review");
+  }
+
+  function clearBatch() {
+    if (batchRunning) return;
+    if (activeBatchId !== null && !canReplace()) return;
+    if (activeBatchId !== null) {
+      uploadRevision.current++; setOpening(false); clearResults();
+      if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+      blobRef.current = null; setReady(false); setImageUrl("/objects-sample.jpg"); setImage(SAMPLE); setThreshold(30);
+    }
+    batchUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+    batchUrlsRef.current = [];
+    setBatch([]); setActiveBatchId(null); setNotice("Batch cleared.");
+  }
 
   const actionRef = useRef(runDetection);
   useEffect(() => { actionRef.current = runDetection; }, [runDetection]);
@@ -232,34 +390,64 @@ export default function Home() {
 
   function updateItem(id: number, values: Partial<Pick<Detection, "review" | "note">>) {
     setRun(current => current ? { ...current, detections: current.detections.map(item => item.id === id ? { ...item, ...values } : item) } : null);
+    if (activeBatchId !== null) {
+      setBatch(batchItems => batchItems.map(item => item.id === activeBatchId && item.run
+        ? { ...item, run: { ...item.run, detections: item.run.detections.map(detection => detection.id === id ? { ...detection, ...values } : detection) } }
+        : item));
+    }
     setDirty(true); setNotice("");
+  }
+  function downloadFile(contents: string, filename: string, type: string) {
+    const url = URL.createObjectURL(new Blob([contents], { type }));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename;
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
   function exportResults(format: "json" | "csv") {
     if (!run) return;
     const report = createReport(image, run, scope === "all" ? items : visible, { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope, mode === "general" ? "general-object" : "surface-defect");
-    const url = URL.createObjectURL(new Blob([format === "json" ? JSON.stringify(report, null, 2) : reportCsv(report)], {
-      type: format === "json" ? "application/json" : "text/csv;charset=utf-8",
-    }));
-    const anchor = document.createElement("a"); anchor.href = url;
-    anchor.download = image.name.replace(/\.[^.]+$/, "") + "-inspection." + format;
-    document.body.appendChild(anchor); anchor.click(); anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    downloadFile(format === "json" ? JSON.stringify(report, null, 2) : reportCsv(report),
+      image.name.replace(/\.[^.]+$/, "") + "-inspection." + format,
+      format === "json" ? "application/json" : "text/csv;charset=utf-8");
     if (scope === "all") setDirty(false);
     setNotice((scope === "all" ? items.length : visible.length) + " results exported as " + format.toUpperCase() + ".");
+  }
+
+  function exportBatch(format: "json" | "csv") {
+    const reports = completedBatch.map(item => createReport(
+      { name: item.name, source: "upload", width: item.width, height: item.height },
+      item.run as Run,
+      (item.run as Run).detections.filter(detection => detection.confidence * 100 >= threshold),
+      { minimumConfidence: threshold / 100, hiddenClasses: [], review: "all" },
+      "filtered",
+      "general-object",
+    ));
+    if (!reports.length) return;
+    if (format === "json") {
+      downloadFile(JSON.stringify({ schemaVersion: 1, reportType: "batch-inspection", exportedAt: new Date().toISOString(),
+        summary: { images: reports.length, detections: reports.reduce((total, report) => total + report.detections.length, 0),
+          meanInferenceMs: Number(batchMeanLatency.toFixed(2)), minimumConfidence: threshold / 100 }, inspections: reports }, null, 2),
+      "inspection-batch.json", "application/json");
+    } else {
+      const rows = reports.map((report, index) => reportCsv(report).split("\r\n").slice(index === 0 ? 0 : 1).join("\r\n"));
+      downloadFile(rows.join("\r\n"), "inspection-batch.csv", "text/csv;charset=utf-8");
+    }
+    if (activeBatchId !== null) setDirty(false);
+    setNotice(reports.length + " completed inspections exported as " + format.toUpperCase() + ".");
   }
 
   return (
     <main className="studio">
       <header className="app-header">
         <div className="wordmark">Visual Inspection <span>Studio</span></div>
-        <div className="header-meta">Computer vision workspace <span className="version">v0.2</span></div>
+        <div className="header-meta">Local inference · Human review · Structured reports <span className="version">v0.3</span></div>
       </header>
       <div className="page-heading">
-        <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspection review</h1></div>
+        <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspect, review, export</h1><p className="heading-copy">Run a real detector, verify each region, and download an audit-ready report.</p></div>
         <div className="heading-actions">
           <label className="mode-picker"><span>Inspection mode</span><select aria-label="Inspection mode" value={mode} onChange={event => changeMode(event.target.value as WorkspaceMode)}><option value="general">General Object Detection</option><option value="surface-defect">Surface Defect Inspection</option></select></label>
           <Button variant="outline" onClick={loadSample} disabled={opening}>Load sample</Button>
-          <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Open image"}</Button>
+          <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Upload image"}</Button>
           <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={mode !== "general" || !ready || busy || opening}>{mode !== "general" ? "Model required" : busy ? phase : "Run detection"}</Button>
           {busy && <Button variant="outline" onClick={() => { cancel(); setNotice("Detection cancelled. Previous results retained."); }}>Cancel</Button>}
         </div>
@@ -268,9 +456,9 @@ export default function Home() {
       </div>
       {error && <div className="message error" role="alert"><span>{error}</span><button onClick={() => setError("")}>Dismiss</button></div>}
       <div className="sr-only" role="status" aria-live="polite">{phase || notice}</div>
-      <Tabs defaultValue="review" className="workspace-tabs">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="workspace-tabs">
         <div className="tab-bar">
-          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="evaluation">Evaluation</TabsTrigger></TabsList>
+          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
           <span className="tab-description">{mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No results generated</>}</span>
         </div>
         {mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured</strong><p>This workspace is ready for a trained defect model, but it will not invent scratches, dents, cracks, or rust results. Use General Object Detection for the working YOLOX demo.</p></div><a href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Review recommended model path</a></div>}
@@ -324,10 +512,11 @@ export default function Home() {
               {mode === "surface-defect" && <section className="inspector-section model-status"><div className="status-kicker">SURFACE DEFECT MODEL</div><h3>Not configured</h3><p>Connect a model trained for this product and camera setup before reviewing defect findings.</p><dl className="properties"><div><dt>Recommended</dt><dd>Anomalib PatchCore / PaDiM</dd></div><div><dt>Input</dt><dd>Customer-approved normal images</dd></div><div><dt>Output</dt><dd>Anomaly map + review region</dd></div></dl><a className="text-control" href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Model documentation</a></section>}
               {mode === "general" && (selected ? <section className="inspector-section">
                 <div className="selected-heading"><h3>{selected.label}</h3><strong className="mono">{percent(selected.confidence)}</strong></div>
+                <div className="crop-view"><canvas ref={cropRef} width={640} height={320} aria-label={`Zoomed view of ${selected.label} detection ${selected.id}`} /><span>Region zoom · surrounding context included</span></div>
                 <dl className="properties"><div><dt>Source</dt><dd>{MODEL.name}</dd></div><div><dt>Position</dt><dd className="mono">{Math.round(selected.x)}, {Math.round(selected.y)} px</dd></div><div><dt>Dimensions</dt><dd className="mono">{Math.round(selected.width)} × {Math.round(selected.height)} px</dd></div></dl>
                 <label className="field-label" htmlFor="review-note">Review note</label>
                 <textarea id="review-note" placeholder="Record an observation…" value={selected.note} maxLength={1000} disabled={busy} onChange={event => updateItem(selected.id, { note: event.target.value })} />
-                <div className="review-actions">{(["accepted", "dismissed"] as Review[]).map(value => <Button key={value} variant={selected.review === value ? "default" : "outline"} aria-pressed={selected.review === value} disabled={busy} onClick={() => updateItem(selected.id, { review: value })}>{value === "accepted" ? "Accept" : "Dismiss"}</Button>)}</div>
+                <div className="review-actions">{(["accepted", "dismissed"] as Review[]).map(value => <Button key={value} variant={selected.review === value ? "default" : "outline"} aria-pressed={selected.review === value} disabled={busy} onClick={() => updateItem(selected.id, { review: value })}>{value === "accepted" ? "Accept finding" : "Reject finding"}</Button>)}</div>
                 {selected.review !== "pending" && <button className="text-control reset-review" disabled={busy} onClick={() => updateItem(selected.id, { review: "pending" })}>Mark as unreviewed</button>}
               </section> : <section className="inspector-section inspector-empty"><p>{run ? "Select a detection in the image or table to review it." : "Detected objects will appear here after the first run."}</p></section>)}
               <section className="inspector-section filters">
@@ -343,26 +532,52 @@ export default function Home() {
                 <h3>Export results</h3>
                 <label htmlFor="export-scope" className="sr-only">Export scope</label>
                 <select id="export-scope" disabled={mode !== "general"} value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
-                <div className="review-actions"><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("json")}>Export JSON</Button><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("csv")}>Export CSV</Button></div>
+                <div className="review-actions"><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("json")}>Download JSON</Button><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("csv")}>Download CSV</Button></div>
                 <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes image metadata, coordinates and review decisions.")}</p>
               </section>
             </aside>
           </div>
         </TabsContent>
+        <TabsContent value="batch" className="batch-workspace">
+          <div className="batch-heading">
+            <div><p className="breadcrumb">Multi-image inspection</p><h2>Process a production sample</h2><p>Queue up to 12 local images, run one detector pass, then open any result in the same manual-review workspace.</p></div>
+            <div className="batch-actions">
+              <input ref={batchInputRef} type="file" className="sr-only" aria-label="Choose batch images" accept="image/png,image/jpeg,image/webp" multiple
+                onChange={event => { void chooseBatchFiles(event.target.files); event.target.value = ""; }} />
+              <Button variant="outline" onClick={() => batchInputRef.current?.click()} disabled={opening || batchRunning || batch.length >= 12}>Add images</Button>
+              <Button onClick={() => void runBatch()} disabled={mode !== "general" || batchRunning || !batch.some(item => item.status === "queued" || item.status === "failed")}>{batchRunning ? phase || "Running batch…" : "Run batch"}</Button>
+              {batchRunning && <Button variant="outline" onClick={() => cancel()}>Cancel</Button>}
+            </div>
+          </div>
+          <div className="batch-summary" aria-label="Batch summary">
+            <div><span>Queued images</span><strong>{batch.length}</strong></div>
+            <div><span>Completed</span><strong>{completedBatch.length}</strong></div>
+            <div><span>Visible findings</span><strong>{batchDetections}</strong></div>
+            <div><span>Mean inference</span><strong>{completedBatch.length ? number(batchMeanLatency) + " ms" : "—"}</strong></div>
+          </div>
+          {batch.length ? <>
+            <div className="batch-table-scroll"><table className="batch-table"><thead><tr><th>Image</th><th>Status</th><th>Findings ≥ {threshold}%</th><th>Inference</th><th>Action</th></tr></thead>
+              <tbody>{batch.map(item => <tr key={item.id}><td><strong title={item.name}>{item.name}</strong><span>{number(item.width)} × {number(item.height)} px</span></td><td><span className={`batch-status ${item.status}`}>{item.status === "complete" ? "Complete" : item.status === "running" ? "Inspecting" : item.status === "failed" ? "Needs retry" : "Queued"}</span>{item.error && <small title={item.error}>{item.error}</small>}</td><td className="mono">{item.run ? item.run.detections.filter(detection => detection.confidence * 100 >= threshold).length : "—"}</td><td className="mono">{item.run ? number(item.run.inferenceMs) + " ms" : "—"}</td><td><Button variant="outline" size="sm" disabled={!item.run || batchRunning} onClick={() => openBatchResult(item)}>Open review</Button></td></tr>)}</tbody>
+            </table></div>
+            <div className="batch-footer"><p>Exports include image metadata, pixel coordinates, confidence, timing, and any saved reviewer decisions.</p><div><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("json")}>Download batch JSON</Button><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("csv")}>Download batch CSV</Button><Button variant="outline" disabled={batchRunning} onClick={clearBatch}>Clear batch</Button></div></div>
+          </> : <div className="batch-empty"><strong>No images queued</strong><p>Add PNG, JPEG, or WebP images. Processing stays in this browser; files are not uploaded to a server.</p><Button onClick={() => batchInputRef.current?.click()}>Choose images</Button></div>}
+        </TabsContent>
         <TabsContent value="evaluation" className="evaluation">
-          <div className="evaluation-heading"><p className="breadcrumb">Model & run details</p><h2>Measured results</h2><p>{mode === "general" ? "Inference timing and review counts come from the current image." : "The defect mode reports setup status until a real domain model is connected."}</p></div>
-          <div className="evaluation-grid"><section><h3>Current run</h3><dl className="properties">
+          <div className="evaluation-heading"><p className="breadcrumb">Operational evidence</p><h2>Model & performance</h2><p>Live runtime statistics are separated from validation metrics so a client can see what is measured and what is not.</p></div>
+          <div className="evaluation-grid"><section><h3>Current browser run</h3><dl className="properties">
             <div><dt>Model</dt><dd>{mode === "general" ? MODEL.name + " / " + MODEL.version : "Not configured"}</dd></div>
             <div><dt>Input resolution</dt><dd>416 × 416</dd></div>
             <div><dt>Inference</dt><dd>{mode === "general" && run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
             <div><dt>Total processing</dt><dd>{mode === "general" && run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
             <div><dt>Completed</dt><dd>{mode === "general" && run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
             <div><dt>Review decisions</dt><dd>{mode === "general" ? accepted + " accepted / " + dismissed + " dismissed" : "Not available"}</dd></div>
-          </dl><p className="secondary-copy">Total processing includes initial model loading when needed. Review decisions are observations, not measured model accuracy.</p></section>
-          <section><h3>Accuracy evaluation</h3><p>No project validation dataset has been evaluated yet. Precision, recall and mAP will remain unreported until there are labelled ground-truth images and a reproducible evaluation.</p>
-            <h3 className="model-scope-title">{mode === "general" ? "Model scope" : "Defect model plan"}</h3><p>{mode === "general" ? "The pretrained COCO model detects 80 everyday object categories. It does not detect scratches, dents or manufacturing defects. Those tasks require domain-specific training." : "Recommended next step: train Anomalib PatchCore or PaDiM on approved normal images, validate anomaly localization on labelled defects, then export a browser-compatible model. No defect result is generated before that step."}</p>
-            <a className="text-control" href={mode === "general" ? MODEL.source : "https://github.com/open-edge-platform/anomalib"} target="_blank" rel="noreferrer">{mode === "general" ? "YOLOX source and model documentation" : "Anomalib model documentation"}</a>
-          </section></div>
+          </dl><p className="secondary-copy">Total processing includes model loading on the first run. Images remain local to this device.</p></section>
+          <section><h3>PCB detector validation</h3><div className="metric-grid"><div><span>Precision</span><strong>69.9%</strong></div><div><span>Recall</span><strong>66.2%</strong></div><div><span>F1</span><strong>68.0%</strong></div><div><span>mAP@0.5</span><strong>69.4%</strong></div></div>
+            <p className="secondary-copy">YOLOX-Nano trained on 7,357 DsPCBSD+ training images and measured on 851 validation images. The frozen test split remains sealed.</p>
+            <h3 className="model-scope-title">Precision-first profile</h3><p>Class-specific thresholds raise validation precision to 77.0% and F1 to 70.2%, with recall at 64.5%. This profile is available for stricter QA triage; it is not applied to the general COCO demo above.</p>
+          </section>
+          <section><h3>Client model integration</h3><p>The review console is intentionally separated from the detector. A client-specific ONNX detector can replace the model while keeping upload, boxes, zoom, confidence controls, review decisions, batch processing, and exports.</p><a className="text-control" href="https://github.com/ibrohimgets/visual-inspection-studio#adapt-it-to-a-client-dataset" target="_blank" rel="noreferrer">See the detector integration workflow</a></section>
+          <section><h3>Known limits</h3><p>The hosted model recognizes 80 everyday COCO categories, not PCB defects. The trained PCB checkpoint is evaluated offline and is not presented as browser inference until its export is verified. Prior Terra routing is retained as a negative baseline and adds no accuracy claim.</p><a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX model documentation</a></section></div>
         </TabsContent>
       </Tabs>
       <footer className="app-footer"><span>Images are processed on this device. Export your results before leaving.</span><span>YOLOX-Nano · Apache-2.0</span></footer>

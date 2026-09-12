@@ -1,174 +1,118 @@
 # Visual Inspection Studio
 
-Visual Inspection Studio is a browser-local review console for computer-vision
-results. It keeps the product work that matters after inference: confidence
-controls, human decisions, notes, audit-friendly exports, and measured run
-timing.
+Visual Inspection Studio is a production-style computer-vision review console:
+upload images, run a real detector, inspect localized findings, record a human
+decision, and download structured inspection reports.
 
-[Open the private demo](https://visual-inspection-studio.iibrohimm.chatgpt.site)
+**[Open the hosted demo](https://visual-inspection-studio.iibrohimm.chatgpt.site/)**
 
-![Synthetic metal inspection sample](public/synthetic-metal-inspection.png)
+The demo performs YOLOX-Nano inference locally in the browser. Images are not
+sent to an inference API. The same review surface is designed to accept a
+client-specific defect detector without rebuilding the operator workflow.
 
-## Current release: real local YOLOX inference
+## Try the complete workflow in under 30 seconds
 
-The **General Object Detection** workflow runs the official YOLOX-Nano ONNX
-model in a Web Worker with ONNX Runtime Web. The model is pinned by SHA-256 in
-`lib/detection.ts`, and the browser verifies the downloaded bytes before
-inference. No image is uploaded to an API.
+1. Select **Load sample**, then **Run detection**.
+2. Select a box to inspect the magnified region and pixel coordinates.
+3. Accept or reject the finding and add a reviewer note.
+4. Change the confidence threshold to see the operating-point tradeoff.
+5. Download the JSON or CSV inspection report.
+6. Open **Batch** to process several local images in one queue.
 
-It can recognize the 80 COCO object categories, such as people, vehicles,
-animals, bottles, furniture, and electronics. It is a general-purpose object
-detector; it does **not** recognize scratches, dents, cracks, rust, or other
-manufacturing defects. The product deliberately says that limitation instead
-of presenting generic object predictions as industrial findings.
+## What the product demonstrates
 
-The review workflow supports:
+| Capability | Implementation |
+| --- | --- |
+| Real inference | Official YOLOX-Nano ONNX model, ONNX Runtime Web, no mocked boxes |
+| Clear localization | Selectable boxes, labels, confidence, pixel coordinates, and region zoom |
+| Human review | Accept, reject, reset, notes, and unsaved-change protection |
+| Batch inspection | Up to 12 local images per browser queue with per-image status and latency |
+| Inspection reports | Safe JSON and CSV export with model provenance, timings, coordinates, filters, and decisions |
+| Operational visibility | Model version, execution provider, inference time, total time, and review counts |
+| Client adaptation | Reproducible train/validation pipeline and a documented ONNX integration boundary |
 
-- PNG, JPEG, and WebP upload or drag-and-drop (20 MB / 40 megapixel guardrails)
-- confidence threshold, class, and review-status filters
-- image and table selection with original-image-pixel coordinates
-- accept, dismiss, and reviewer notes for every finding
-- JSON and CSV exports with model provenance, timing, coordinates, and review state
-- a measured evaluation view that does not invent precision, recall, or mAP
-
-## Defect-inspection direction
-
-The mode selector includes **Surface Defect Inspection**, but it is intentionally
-shown as **model required** rather than bundled with fake results. A useful
-defect detector must be trained or fine-tuned on a known product, camera setup,
-and defect taxonomy. Once connected, it can reuse the existing review, notes,
-filters, and export workflow.
-
-Our recommended production path is [Anomalib](https://github.com/open-edge-platform/anomalib)
-with an Apache-2.0 model such as PatchCore or PaDiM. Train it on approved
-normal images from the target line, validate it on labelled defect images,
-then export a browser-compatible model and connect its anomaly map to this
-same review workflow. This is a better fit for many inspection lines than
-pretending a COCO detector understands surface damage.
-
-For a reproducible public benchmark, two useful CC BY 4.0 candidates are:
-
-- [NEU-CLS](https://figshare.com/articles/dataset/NEU-CLS/28903550): 1,800
-  grayscale steel images across six defect classes. It is a classification
-  benchmark, so it is suitable for a future classifier or training reference,
-  not direct bounding-box inference.
-- [DsPCBSD+](https://figshare.com/articles/dataset/DsPCBSD_/24970329): PCB
-  images with manually annotated defect boxes across nine categories. It is a
-  stronger supervised detection benchmark, but its PCB domain should not be
-  represented as a metal-surface model.
-
-[KolektorSDD2](https://www.vicos.si/resources/kolektorsdd2/) is a valuable real
-industrial dataset, but its CC BY-NC-SA 4.0 terms are not appropriate for
-unrestricted commercial redistribution. It should only be used after the
-necessary permission is obtained.
-
-## Evidence and limitations
-
-- The included sample is a synthetic image used to make the workflow easy to
-  try. Its detections are produced by the pinned model, not hardcoded fixture
-  data.
-- Inference runs in a browser Web Worker using WASM. The UI reports the actual
-  model inference time and total processing time for the current device; the
-  first run can include model loading. A sample development run measured about
-  173 ms inference on the test machine, but this is not a performance promise.
-- General COCO-demo accuracy is not claimed for this app. The separate PCB
-  detector now has a repeatable validation-only baseline documented below;
-  frozen-test performance remains intentionally unreported.
-- Images stay on the local device in this demo. Do not use it as the sole basis
-  for safety-critical or high-impact decisions.
-
-Potential client use cases include component presence checks, PPE or equipment
-review, visual triage, QA annotation, and a human-in-the-loop front end for a
-future customer-specific defect model.
-
-## Phase 1: evaluation harness
-
-The repository now contains the first reproducible layer for the
-zero/few-shot study in `lib/evaluation.ts`, `scripts/evaluate.mjs`, and
-`evaluation/README.md`. It validates a versioned ground-truth manifest,
-assigns deterministic group-aware train/validation/test splits, computes
-box-level precision, recall, F1, per-class metrics, 101-point AP, mean AP, and
-latency summaries, and provides calibration and selective-risk utilities for
-future uncertainty experiments.
-
-Phase 1 deliberately does not contain VLM predictions or accuracy claims. Run
-it only with a real manifest and recorded model output:
-
-```bash
-npm run evaluate -- --manifest path/to/manifest.json \
-  --predictions path/to/predictions.json --split test \
-  --output reports/local/run.json
+```mermaid
+flowchart LR
+  A[Image or batch] --> B[YOLOX inference worker]
+  B --> C[Boxes and confidence]
+  C --> D[Region zoom]
+  D --> E[Human accept / reject / note]
+  E --> F[JSON or CSV report]
 ```
 
-The first benchmark domain is DsPCBSD+, a PCB surface-defect dataset with
-nine annotated categories. Its source and license are recorded in the harness;
-raw images and generated local reports remain outside Git by default.
+## What works today
 
-## Phase 2: zero/few-shot VLM contract
+### Hosted general-object demo
 
-The next layer is a strict, provider-neutral adapter in [`lib/vlm.ts`](lib/vlm.ts)
-with its protocol documented in [`vlm/README.md`](vlm/README.md). It supports
-zero-shot inspection and exactly 1-, 3-, or 5-shot support examples without
-pretending that a model score is a calibrated probability. Responses must use
-the frozen DsPCBSD+ labels, pixel-space boxes, evidence, and explicit
-uncertainty reasons. Every finding is routed to human review by default.
+The working browser mode uses the official YOLOX-Nano COCO checkpoint. It
+recognizes 80 everyday categories such as people, vehicles, bottles, furniture,
+and electronics. It does **not** recognize PCB defects, scratches, dents, rust,
+or cracks. Model bytes are pinned by SHA-256 and verified before inference.
 
-The first local provider is the loopback-only
-[SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct)
-gateway documented in [`vlm/README.md`](vlm/README.md). It is a general
-multimodal model rather than a PCB-defect model, so malformed responses and
-weak localization are expected failure cases. The validation runner records
-those failures instead of repairing them into predictions.
+### Specialized PCB detector
 
-An optional loopback gateway for GPT-5.6 Terra uses the same adapter and keeps
-the API key out of browser code and committed files. Its first six-image
-validation probe produced valid structured responses, but did not meet the
-IoU/class gate. The measured results and limitations are recorded in
-[`vlm/experiments/2026-09-12-gpt-5.6-terra-validation.md`](vlm/experiments/2026-09-12-gpt-5.6-terra-validation.md).
-The browser YOLOX workflow remains unchanged, and the frozen test split has not
-been run.
+A separate YOLOX-Nano detector was trained on the DsPCBSD+ PCB defect benchmark
+using only the training split. It covers nine annotated defect categories. The
+checkpoint is evaluated offline and is not presented as browser inference until
+its ONNX export and decoder are verified end to end.
 
-The next controlled experiment adds magnified crop verification and real
-training-only support images. Its measured comparison is documented in
-[`vlm/experiments/2026-09-12-terra-crop-few-shot-comparison.md`](vlm/experiments/2026-09-12-terra-crop-few-shot-comparison.md).
-On the six-image validation probe, the best few-shot conditions matched only 2
-of 13 defects at class-aware IoU 0.5, while crop verification over-abstained.
-That result supports a detector-first hybrid next rather than additional prompt
-tuning. It is not a full-dataset accuracy claim.
+This distinction is deliberate: the interface never relabels generic COCO
+predictions as industrial defects and never displays fabricated results.
 
-## Phase 3: specialized PCB detector baseline
+## Measured detector evidence
 
-A YOLOX-Nano PCB detector has now been trained on all 7,357 training images and
-validated on the 851-image validation split. At the validation-selected 0.37
-confidence threshold and class-aware IoU 0.5, it measured 69.86% precision,
-66.19% recall, 67.98% F1, and 69.41% ranked mAP@0.5. Full CPU validation ran at
-42.89 images/second wall-clock on the development machine.
+The PCB detector was trained on 7,357 DsPCBSD+ training images and evaluated on
+851 validation images at class-aware IoU 0.5. The frozen test split remains
+sealed.
 
-These are validation results, not frozen-test or production claims. The
-training scripts, integrity checks, exact protocol, per-class results, and
-failure analysis are in [`detector/README.md`](detector/README.md) and
-[`detector/experiments/2026-09-12-yolox-nano-validation.md`](detector/experiments/2026-09-12-yolox-nano-validation.md).
-The existing browser-local YOLOX object-detection workflow remains unchanged.
-Terra verification and human-review routing are deliberately deferred to the
-next milestone so the detector-only baseline remains independently auditable.
+| Validation profile | Precision | Recall | F1 | Ranked mAP@0.5 |
+| --- | ---: | ---: | ---: | ---: |
+| Global threshold 0.37 | 69.86% | 66.19% | 67.98% | 69.41% |
+| Class-specific, precision-first | 76.97% | 64.53% | 70.20% | 69.41% |
 
-## Phase 4: validation-only hybrid routing
+The precision-first profile removes 150 false positives while losing 27 true
+positives. It is an operator choice, not a claim that every metric improved.
+Full protocol and per-class evidence are in
+[`detector/experiments/2026-09-12-yolox-nano-validation.md`](detector/experiments/2026-09-12-yolox-nano-validation.md)
+and
+[`detector/experiments/2026-09-12-class-thresholds-validation.md`](detector/experiments/2026-09-12-class-thresholds-validation.md).
 
-The full validation split has now been used to test selective Terra verification
-for only the detector's 0.29–0.60 uncertainty band. The result is deliberately
-reported even though it is negative: detector + Terra did not beat detector
-only. The safe validation-selected Terra cutoff suppresses almost every VLM
-action, leaving the same 69.86% precision, 66.19% recall, and 67.98% F1 while
-adding 105 successful API calls and roughly $1.76–$1.80 of measured/estimated
-cost.
-
-Human routing can lift automatic precision to 85.21%, but it queues 836 of 839
-ambiguous proposals across 49.24% of validation images. A perfect ground-truth
-reviewer simulation reaches 80.54% F1, but that is explicitly an oracle ceiling,
-not measured human performance. The protocol, routing tradeoffs, latency, cost,
-and limitations are documented in
+The earlier Terra hybrid is retained as a negative baseline: it did not improve
+the automatic detector and added API cost. See
 [`detector/experiments/2026-09-12-hybrid-validation.md`](detector/experiments/2026-09-12-hybrid-validation.md).
-The frozen test split remains sealed.
+
+## Engineering decisions
+
+- Inference runs in a Web Worker, so model work does not block the review UI.
+- Browser input has file-type, file-size, pixel-count, timeout, and malformed-output guardrails.
+- Coordinates remain in original-image pixel space from detection through export.
+- CSV values are protected against spreadsheet-formula injection.
+- Review changes trigger leave/replace protection until a complete report is exported.
+- Model and runtime licenses are stored beside the distributed artifacts.
+- Accuracy evidence is split-aware; validation results are never described as test or production performance.
+
+## Adapt it to a client dataset
+
+The detector and review application are intentionally separated. A client
+engagement can replace the model without rewriting the operator experience:
+
+1. Define the client’s defect taxonomy, camera setup, acceptance criteria, and
+   train/validation/test split before training.
+2. Convert labelled images to the versioned manifest described in
+   [`evaluation/README.md`](evaluation/README.md).
+3. Train with [`detector/train_yolox_cpu.py`](detector/train_yolox_cpu.py), then
+   select operating thresholds on validation only.
+4. Export the approved checkpoint to ONNX and verify preprocessing, output
+   decoding, NMS, labels, and a known validation sample.
+5. Replace `public/models/yolox_nano.onnx` and update the model metadata and class
+   list in [`lib/detection.ts`](lib/detection.ts).
+6. Run the browser tests and compare exported coordinates and scores against the
+   reference Python inference before deployment.
+
+The current browser contract is a 416 × 416 top-left letterboxed image, BGR CHW
+float32 values in the 0–255 range, and YOLOX box decoding. A different detector
+can be integrated by changing the worker-side pre/post-processing while keeping
+the review, batch, and reporting components intact.
 
 ## Local development
 
@@ -179,7 +123,7 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-Quality checks used before release:
+Quality checks:
 
 ```bash
 npm run typecheck
@@ -188,16 +132,29 @@ npm run lint
 npm run build
 ```
 
-## Model and runtime attribution
+Detector training and validation setup is documented in
+[`detector/README.md`](detector/README.md). The dataset, checkpoints, predictions,
+and local reports stay under ignored `reports/local/` paths.
 
-- [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) and the bundled
-  `public/models/yolox_nano.onnx` are distributed under Apache-2.0. The full
-  license text is included in `public/models/YOLOX-LICENSE.txt`.
-- [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) is used under
-  its MIT license. The relevant license text is included in
-  `public/models/ONNX-Runtime-LICENSE.txt`.
+## Repository map
 
-## License
+```text
+app/          Inspection and batch-review interface
+lib/          Browser inference, reporting, evaluation, and routing logic
+detector/     Reproducible YOLOX training and validation pipeline
+evaluation/   Dataset manifest and split-integrity documentation
+tests/        Detection, export, evaluation, VLM, and routing tests
+vlm/          Preserved VLM baselines and local adapter documentation
+```
 
-MIT for this application code. Third-party model, runtime, and dataset terms
-remain applicable as described above.
+## Privacy, limitations, and licenses
+
+- The hosted demo processes images in the browser. Do not use it as the sole
+  basis for safety-critical decisions.
+- First-run timing can include model loading. The UI reports measured time for
+  the current device rather than promising a fixed speed.
+- DsPCBSD+ is distributed under CC BY 4.0. Raw images are not committed here.
+- YOLOX is Apache-2.0; ONNX Runtime is MIT. Their notices are included in
+  `public/models/`.
+- Application code is MIT licensed. Third-party model and dataset terms still
+  apply.
