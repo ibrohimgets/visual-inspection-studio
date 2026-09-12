@@ -97,6 +97,7 @@ will launch the gateway, and then run:
 python vlm/openai_gateway.py `
   --model gpt-5.6-terra `
   --reasoning-effort low `
+  --max-output-tokens 2400 `
   --port 8010
 ```
 
@@ -120,6 +121,46 @@ The first Terra probe is recorded in
 [`experiments/2026-09-12-gpt-5.6-terra-validation.md`](experiments/2026-09-12-gpt-5.6-terra-validation.md).
 It passed the response-structure gate but did not pass the localization and
 class gate, so the frozen test split was intentionally not run.
+
+## Crop verification and controlled support-image experiments
+
+`scripts/run-vlm-experiments.mjs` compares five conditions on the same
+deterministic validation images:
+
+1. zero-shot full-image inspection;
+2. zero-shot full-image proposals followed by magnified crop verification;
+3. one approved training support image;
+4. three nested approved training support images; and
+5. five nested approved training support images.
+
+The word "shot" in this experiment means one annotated **support image**, not
+one example per defect class. Support images and all their COCO boxes are sent
+before the query image. The support bank is selected deterministically from the
+training split by new class coverage, and the runner fails if a support/query
+overlap or split escape is detected.
+
+Crop verification adds padding around each full-image proposal, enlarges the
+crop for a second independent inspection, and maps the verified crop box back
+to original-image coordinates. A rejected crop produces no final finding; it
+is never replaced by a fabricated box.
+
+```powershell
+npm run vlm:experiments -- `
+  --endpoint http://127.0.0.1:8010/inspect `
+  --model gpt-5.6-terra `
+  --limit 6
+```
+
+The report includes class-aware detection metrics, class-agnostic localization,
+classification accuracy among localized matches, latency, provider token
+usage, and estimated API cost. Pricing defaults are explicit command-line
+inputs and are recorded with their source and check date. Raw reports remain
+under Git-ignored `reports/local/`.
+
+The first comparison is recorded in
+[`experiments/2026-09-12-terra-crop-few-shot-comparison.md`](experiments/2026-09-12-terra-crop-few-shot-comparison.md).
+Neither crop verification nor 1/3/5 support images produced sufficient recall,
+so the frozen test split was not run.
 
 ## Privacy boundary
 

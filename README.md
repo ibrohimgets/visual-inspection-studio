@@ -127,6 +127,14 @@ IoU/class gate. The measured results and limitations are recorded in
 The browser YOLOX workflow remains unchanged, and the frozen test split has not
 been run.
 
+The next controlled experiment adds magnified crop verification and real
+training-only support images. Its measured comparison is documented in
+[`vlm/experiments/2026-09-12-terra-crop-few-shot-comparison.md`](vlm/experiments/2026-09-12-terra-crop-few-shot-comparison.md).
+On the six-image validation probe, the best few-shot conditions matched only 2
+of 13 defects at class-aware IoU 0.5, while crop verification over-abstained.
+That result supports a detector-first hybrid next rather than additional prompt
+tuning. It is not a full-dataset accuracy claim.
+
 ## Local development
 
 ```bash

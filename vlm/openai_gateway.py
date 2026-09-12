@@ -20,6 +20,18 @@ from typing import Any
 import requests
 
 
+def image_content(image: dict[str, Any], field: str) -> dict[str, str]:
+    encoded = image.get("base64")
+    mime_type = image.get("mimeType")
+    if not isinstance(encoded, str) or not encoded or not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+        raise ValueError(f"{field} must contain base64 data and an image MIME type")
+    try:
+        base64.b64decode(encoded, validate=True)
+    except Exception as error:  # noqa: BLE001 - normalize malformed input
+        raise ValueError(f"{field}.base64 is invalid") from error
+    return {"type": "input_image", "image_url": f"data:{mime_type};base64,{encoded}", "detail": "high"}
+
+
 def inspection_schema(labels: list[str]) -> dict[str, Any]:
     return {
         "type": "object",
@@ -76,7 +88,7 @@ def output_text(response: dict[str, Any]) -> str:
 
 
 class OpenAIGateway:
-    def __init__(self, model: str, reasoning_effort: str, timeout_seconds: int):
+    def __init__(self, model: str, reasoning_effort: str, timeout_seconds: int, max_output_tokens: int):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
@@ -84,6 +96,7 @@ class OpenAIGateway:
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max_output_tokens
 
     def inspect(self, envelope: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         request = envelope.get("request", {})
@@ -94,24 +107,39 @@ class OpenAIGateway:
             raise ValueError(f"gateway is configured for {self.model}")
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("request prompt is required")
-        encoded = image.get("base64")
-        mime_type = image.get("mimeType")
-        if not isinstance(encoded, str) or not encoded or not isinstance(mime_type, str) or not mime_type.startswith("image/"):
-            raise ValueError("request image must contain base64 data and an image MIME type")
-        try:
-            base64.b64decode(encoded, validate=True)
-        except Exception as error:  # noqa: BLE001 - normalize malformed input
-            raise ValueError("request image.base64 is invalid") from error
+        query_image = image_content(image, "request image")
         labels = [item.get("label") for item in task.get("classes", []) if isinstance(item, dict) and isinstance(item.get("label"), str)]
         if not labels:
             raise ValueError("request task.classes must contain labels")
+
+        content: list[dict[str, str]] = [{"type": "input_text", "text": prompt}]
+        support_examples = request.get("supportExamples", [])
+        if not isinstance(support_examples, list):
+            raise ValueError("request supportExamples must be an array")
+        for index, example in enumerate(support_examples):
+            if not isinstance(example, dict) or not isinstance(example.get("image"), dict):
+                raise ValueError(f"support example {index} must contain an image")
+            annotations = example.get("annotations", [])
+            annotation_text = "; ".join(
+                f"{item.get('label')} at x={item.get('x')}, y={item.get('y')}, width={item.get('width')}, height={item.get('height')}"
+                for item in annotations if isinstance(item, dict)
+            )
+            content.append({
+                "type": "input_text",
+                "text": f"Approved training support image {index + 1} ({example.get('id', 'unknown')}): {annotation_text or example.get('label', 'label unavailable')}",
+            })
+            content.append(image_content(example["image"], f"support example {index} image"))
+        content.extend([
+            {"type": "input_text", "text": "Query image: inspect this image and return findings only for this query, not for the support examples."},
+            query_image,
+        ])
 
         client_request_id = str(uuid.uuid4())
         body = {
             "model": self.model,
             "store": False,
             "reasoning": {"effort": self.reasoning_effort},
-            "max_output_tokens": 1200,
+            "max_output_tokens": self.max_output_tokens,
             "text": {
                 "verbosity": "low",
                 "format": {
@@ -123,10 +151,7 @@ class OpenAIGateway:
             },
             "input": [{
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": f"data:{mime_type};base64,{encoded}", "detail": "high"},
-                ],
+                "content": content,
             }],
         }
         started = time.perf_counter()
@@ -156,6 +181,7 @@ class OpenAIGateway:
             "clientRequestId": client_request_id,
             "providerLatencyMs": elapsed_ms,
             "usage": payload.get("usage"),
+            "serviceTier": payload.get("service_tier"),
             "stored": False,
         }
 
@@ -197,8 +223,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8010)
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high", "xhigh", "max"], default="low")
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--max-output-tokens", type=int, default=2400)
     args = parser.parse_args()
-    Handler.gateway = OpenAIGateway(args.model, args.reasoning_effort, args.timeout)
+    if args.max_output_tokens < 256:
+        parser.error("--max-output-tokens must be at least 256")
+    Handler.gateway = OpenAIGateway(args.model, args.reasoning_effort, args.timeout, args.max_output_tokens)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[openai-vlm] listening on http://{args.host}:{args.port}/inspect with {args.model}")
     server.serve_forever()

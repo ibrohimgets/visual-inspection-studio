@@ -36,6 +36,18 @@ test("request validation enforces zero-shot and few-shot counts", () => {
   assert.match(buildInspectionPrompt({ ...request, mode: "few-shot", supportExamples: [{ id: "one", label: "CS", description: "approved scratch example" }] }), /one: CS/);
 });
 
+test("few-shot annotations require training images and stay within their bounds", () => {
+  const support = {
+    id: "train-a",
+    label: "CS",
+    image: { mimeType: "image/jpeg", base64: "abc", width: 100, height: 80 },
+    annotations: [{ label: "CS", x: 10, y: 20, width: 30, height: 10 }],
+  };
+  assert.doesNotThrow(() => validateInspectionRequest({ ...request, mode: "few-shot", supportExamples: [support] }));
+  assert.throws(() => validateInspectionRequest({ ...request, mode: "few-shot", supportExamples: [{ ...support, annotations: [{ ...support.annotations[0], x: 90, width: 30 }] }] }), /inside the support image/);
+  assert.throws(() => validateInspectionRequest({ ...request, mode: "few-shot", supportExamples: [{ ...support, image: undefined }] }), /needs an image/);
+});
+
 test("response parsing normalizes findings and always defers to review", () => {
   const result = parseVlmResponse(validResponse, request, "local-test-vlm", 42);
   assert.equal(result.protocolVersion, 1);

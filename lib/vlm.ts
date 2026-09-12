@@ -12,11 +12,19 @@ export const ZERO_SHOT_PROMPT_VERSION = "pcb-zero-shot-v1" as const;
 
 export type VlmMode = "zero-shot" | "few-shot";
 export type VlmImage = { mimeType: string; base64: string; width: number; height: number };
+export type SupportAnnotation = {
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type SupportExample = {
   id: string;
   label: string;
   description?: string;
   image?: VlmImage;
+  annotations?: SupportAnnotation[];
 };
 export type InspectionTask = {
   id: string;
@@ -98,6 +106,12 @@ export function validateInspectionRequest(request: VlmInspectionRequest) {
   for (const example of supportExamples) {
     if (!example.id || !labels.has(example.label)) throw new Error(`Support example ${example.id || "(missing id)"} uses an unsupported label.`);
     if (example.image) validateImage(example.image);
+    if (example.annotations && !example.image) throw new Error(`Support example ${example.id} needs an image when annotations are provided.`);
+    for (const [index, annotation] of (example.annotations || []).entries()) {
+      if (!labels.has(annotation.label)) throw new Error(`Support example ${example.id} annotation ${index} uses an unsupported label.`);
+      if (![annotation.x, annotation.y, annotation.width, annotation.height].every(finite) || annotation.x < 0 || annotation.y < 0 || annotation.width <= 0 || annotation.height <= 0) throw new Error(`Support example ${example.id} annotation ${index} has an invalid box.`);
+      if (example.image && (annotation.x + annotation.width > example.image.width || annotation.y + annotation.height > example.image.height)) throw new Error(`Support example ${example.id} annotation ${index} must stay inside the support image.`);
+    }
   }
   return request;
 }
@@ -106,7 +120,13 @@ export function buildInspectionPrompt(request: VlmInspectionRequest): string {
   validateInspectionRequest(request);
   const classList = request.task.classes.map(item => `- ${item.label}: ${item.description}`).join("\n");
   const examples = request.mode === "few-shot"
-    ? [`This is a ${request.supportExamples?.length}-shot run. Compare the query image against these approved support examples, but do not copy their coordinates:`, ...(request.supportExamples || []).map(example => `- ${example.id}: ${example.label}${example.description ? ` — ${example.description}` : ""}`)]
+    ? [
+        `This is a ${request.supportExamples?.length}-support-image run. Compare the query image against the approved training examples attached before the query image, but do not copy their coordinates.`,
+        ...(request.supportExamples || []).map(example => {
+          const annotations = (example.annotations || []).map(annotation => `${annotation.label} [x=${annotation.x.toFixed(1)}, y=${annotation.y.toFixed(1)}, width=${annotation.width.toFixed(1)}, height=${annotation.height.toFixed(1)}]`).join("; ");
+          return `- ${example.id}: ${annotations || example.label}${example.description ? ` — ${example.description}` : ""}`;
+        }),
+      ]
     : ["This is a zero-shot run: do not assume task-specific training and do not invent a defect."];
   return [
     `You are performing ${request.task.title} for an industrial visual-inspection study.`,
