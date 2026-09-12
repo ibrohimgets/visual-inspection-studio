@@ -43,5 +43,7 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+/datasets/
+/reports/local/
 /public/runtime/
 *.tsbuildinfo

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "id": "dspcbsd-plus",
+    "title": "DsPCBSD+",
+    "source": "https://figshare.com/articles/dataset/DsPCBSD_/24970329",
+    "license": "CC BY 4.0",
+    "classes": ["SH", "SP", "SC", "OP", "MB", "HB", "CS", "CFO", "BMFO"]
+  },
+  "images": []
+}

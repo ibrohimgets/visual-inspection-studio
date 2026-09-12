@@ -80,6 +80,29 @@ Potential client use cases include component presence checks, PPE or equipment
 review, visual triage, QA annotation, and a human-in-the-loop front end for a
 future customer-specific defect model.
 
+## Phase 1: evaluation harness
+
+The repository now contains the first reproducible layer for the
+zero/few-shot study in `lib/evaluation.ts`, `scripts/evaluate.mjs`, and
+`evaluation/README.md`. It validates a versioned ground-truth manifest,
+assigns deterministic group-aware train/validation/test splits, computes
+box-level precision, recall, F1, per-class metrics, 101-point AP, mean AP, and
+latency summaries, and provides calibration and selective-risk utilities for
+future uncertainty experiments.
+
+Phase 1 deliberately does not contain VLM predictions or accuracy claims. Run
+it only with a real manifest and recorded model output:
+
+```bash
+npm run evaluate -- --manifest path/to/manifest.json \
+  --predictions path/to/predictions.json --split test \
+  --output reports/local/run.json
+```
+
+The first benchmark domain is DsPCBSD+, a PCB surface-defect dataset with
+nine annotated categories. Its source and license are recorded in the harness;
+raw images and generated local reports remain outside Git by default.
+
 ## Local development
 
 ```bash

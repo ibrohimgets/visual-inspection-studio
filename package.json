@@ -15,6 +15,7 @@
     "lint": "eslint app lib scripts tests",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
+    "evaluate": "node scripts/evaluate.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
