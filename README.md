@@ -71,8 +71,9 @@ necessary permission is obtained.
   model inference time and total processing time for the current device; the
   first run can include model loading. A sample development run measured about
   173 ms inference on the test machine, but this is not a performance promise.
-- Accuracy metrics remain unreported until a labelled validation set and a
-  repeatable evaluation script are added.
+- General COCO-demo accuracy is not claimed for this app. The separate PCB
+  detector now has a repeatable validation-only baseline documented below;
+  frozen-test performance remains intentionally unreported.
 - Images stay on the local device in this demo. Do not use it as the sole basis
   for safety-critical or high-impact decisions.
 
@@ -134,6 +135,22 @@ On the six-image validation probe, the best few-shot conditions matched only 2
 of 13 defects at class-aware IoU 0.5, while crop verification over-abstained.
 That result supports a detector-first hybrid next rather than additional prompt
 tuning. It is not a full-dataset accuracy claim.
+
+## Phase 3: specialized PCB detector baseline
+
+A YOLOX-Nano PCB detector has now been trained on all 7,357 training images and
+validated on the 851-image validation split. At the validation-selected 0.37
+confidence threshold and class-aware IoU 0.5, it measured 69.86% precision,
+66.19% recall, 67.98% F1, and 69.41% ranked mAP@0.5. Full CPU validation ran at
+42.89 images/second wall-clock on the development machine.
+
+These are validation results, not frozen-test or production claims. The
+training scripts, integrity checks, exact protocol, per-class results, and
+failure analysis are in [`detector/README.md`](detector/README.md) and
+[`detector/experiments/2026-09-12-yolox-nano-validation.md`](detector/experiments/2026-09-12-yolox-nano-validation.md).
+The existing browser-local YOLOX object-detection workflow remains unchanged.
+Terra verification and human-review routing are deliberately deferred to the
+next milestone so the detector-only baseline remains independently auditable.
 
 ## Local development
 

@@ -19,6 +19,7 @@
     "prepare:dataset": "node scripts/prepare-dspcbsd.mjs",
     "vlm:validation": "node scripts/run-vlm-validation.mjs",
     "vlm:experiments": "node scripts/run-vlm-experiments.mjs",
+    "detector:tune": "node scripts/tune-detector.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

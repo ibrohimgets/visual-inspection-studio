@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "model": "YOLOX-Nano PCB",
+  "upstreamCommit": "419778480ab6ec0590e5d3831b3afb3b46ab2aa3",
+  "training": {
+    "split": "train",
+    "imageCount": 7357,
+    "boxCount": 14563,
+    "epochs": 5,
+    "batchSize": 32,
+    "inputSize": 256,
+    "seed": 20260912,
+    "device": "cpu",
+    "totalSeconds": 1456.9327955999179,
+    "finalMeanLoss": 4.07661871599114
+  },
+  "validation": {
+    "split": "validation",
+    "imageCount": 851,
+    "boxCount": 1621,
+    "iouThreshold": 0.5,
+    "selectedConfidenceThreshold": 0.37,
+    "selectionRule": "Maximum class-aware F1; ties prefer recall, then precision, then lower confidence threshold.",
+    "truePositives": 1073,
+    "falsePositives": 463,
+    "falseNegatives": 548,
+    "precision": 0.6985677083333334,
+    "recall": 0.661937075879087,
+    "f1": 0.6797592651251188,
+    "rankingMap50AtProposalFloor": 0.6940965892055138,
+    "proposalConfidenceFloor": 0.001,
+    "localization": {
+      "precision": 0.74609375,
+      "recall": 0.7069710055521283,
+      "classificationAccuracyOnLocalized": 0.9197207678883071
+    },
+    "wallClockInference": {
+      "totalMs": 19843.393299961463,
+      "meanMsPerImage": 23.317735957651543,
+      "imagesPerSecond": 42.885810261174065
+    }
+  },
+  "testSplitAccessed": false,
+  "limitations": [
+    "Validation-only result; no frozen-test or production claim.",
+    "mAP is 101-point class mean AP at IoU 0.5, not COCO mAP@[.5:.95].",
+    "Latency was measured on the development machine and is not a deployment guarantee."
+  ]
+}
