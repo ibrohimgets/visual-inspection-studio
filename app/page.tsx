@@ -7,6 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
 import type { Detection, ImageInfo, Review, Run } from "@/lib/detection";
 import { DEFAULT_DETECTOR } from "@/lib/detectors/registry";
+import { evaluateInspection, normalizeInspectionRuleSet } from "@/lib/inspection-rules";
+import generalObjectDemoPolicy from "@/inspection/policies/general-object-demo.json";
 
 declare global {
   interface Document {
@@ -39,6 +41,10 @@ const modeLabel: Record<WorkspaceMode, string> = {
 };
 const percent = (value: number) => (value * 100).toFixed(1) + "%";
 const number = (value: number) => Math.round(value).toLocaleString();
+const DEMO_RULE_SET = normalizeInspectionRuleSet(generalObjectDemoPolicy).ruleSet;
+const applyDemoRules = (detections: readonly Detection[]) => evaluateInspection(detections, DEMO_RULE_SET);
+const configuredOutcome = (rule: (typeof DEMO_RULE_SET.rules)[number]) =>
+  rule.type === "confidence-review" || rule.type === "unsupported" ? "REVIEW" : rule.outcome;
 
 export default function Home() {
   const [mode, setMode] = useState<WorkspaceMode>("general");
@@ -76,6 +82,7 @@ export default function Home() {
   const busy = phase !== "";
   const items = useMemo(() => run?.detections ?? [], [run]);
   const visible = useMemo(() => visibleDetections(items, threshold, hiddenClasses, reviewFilter), [items, threshold, hiddenClasses, reviewFilter]);
+  const inspectionDecision = useMemo(() => run ? applyDemoRules(items) : null, [items, run]);
   const selected = visible.find(item => item.id === selectedId) ?? null;
   const classes = Array.from(new Set(items.map(item => item.label))).sort();
   const accepted = items.filter(item => item.review === "accepted").length;
@@ -388,8 +395,10 @@ export default function Home() {
         if (dirtyRef.current) throw new Error("Export review changes before running detection again.");
         if (modeRef.current !== "general") throw new Error("Surface defect inspection is not configured yet. Train and export a domain-specific model first.");
         const result = await actionRef.current();
+        const decision = applyDemoRules(result.detections);
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-        return { status: "complete", mode: "general-object", model: MODEL.name, candidates: result.detections.length, inferenceMs: result.inferenceMs };
+        return { status: "complete", mode: "general-object", model: MODEL.name, candidates: result.detections.length,
+          inferenceMs: result.inferenceMs, inspectionOutcome: decision.outcome, severity: decision.severity };
       },
     };
     try { void Promise.resolve(document.modelContext.registerTool(tool, { signal: controller.signal })).catch(() => undefined); }
@@ -414,7 +423,9 @@ export default function Home() {
   }
   function exportResults(format: "json" | "csv") {
     if (!run) return;
-    const report = createReport(image, run, scope === "all" ? items : visible, { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope, mode === "general" ? "general-object" : "surface-defect");
+    const report = createReport(image, run, scope === "all" ? items : visible,
+      { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope,
+      mode === "general" ? "general-object" : "surface-defect", inspectionDecision);
     downloadFile(format === "json" ? JSON.stringify(report, null, 2) : reportCsv(report),
       image.name.replace(/\.[^.]+$/, "") + "-inspection." + format,
       format === "json" ? "application/json" : "text/csv;charset=utf-8");
@@ -430,10 +441,11 @@ export default function Home() {
       { minimumConfidence: threshold / 100, hiddenClasses: [], review: "all" },
       "filtered",
       "general-object",
+      applyDemoRules((item.run as Run).detections),
     ));
     if (!reports.length) return;
     if (format === "json") {
-      downloadFile(JSON.stringify({ schemaVersion: 1, reportType: "batch-inspection", exportedAt: new Date().toISOString(),
+      downloadFile(JSON.stringify({ schemaVersion: 2, reportType: "batch-inspection", exportedAt: new Date().toISOString(),
         summary: { images: reports.length, detections: reports.reduce((total, report) => total + report.detections.length, 0),
           meanInferenceMs: Number(batchMeanLatency.toFixed(2)), minimumConfidence: threshold / 100 }, inspections: reports }, null, 2),
       "inspection-batch.json", "application/json");
@@ -449,7 +461,7 @@ export default function Home() {
     <main className="studio">
       <header className="app-header">
         <div className="wordmark">Visual Inspection <span>Studio</span></div>
-        <div className="header-meta">Local inference · Human review · Structured reports <span className="version">v0.3</span></div>
+        <div className="header-meta">Local inference · Deterministic rules · Structured reports <span className="version">v0.4</span></div>
       </header>
       <div className="page-heading">
         <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspect, review, export</h1><p className="heading-copy">Run a real detector, verify each region, and download an audit-ready report.</p></div>
@@ -467,11 +479,16 @@ export default function Home() {
       <div className="sr-only" role="status" aria-live="polite">{phase || notice}</div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="workspace-tabs">
         <div className="tab-bar">
-          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
+          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="decision">Rules & decision</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
           <span className="tab-description">{mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No results generated</>}</span>
         </div>
         {mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured</strong><p>This workspace is ready for a trained defect model, but it will not invent scratches, dents, cracks, or rust results. Use General Object Detection for the working YOLOX demo.</p></div><a href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Review recommended model path</a></div>}
         <TabsContent value="review">
+          {mode === "general" && inspectionDecision && <section className={`decision-strip ${inspectionDecision.outcome.toLowerCase()}`} aria-label="Inspection decision">
+            <div className="decision-mark"><span>RULE DECISION</span><strong>{inspectionDecision.outcome}</strong><small>{inspectionDecision.severity} severity</small></div>
+            <div className="decision-copy"><strong>{inspectionDecision.policy.name}</strong><p>{inspectionDecision.summary}</p></div>
+            <button className="text-control" onClick={() => setActiveTab("decision")}>View decision trace</button>
+          </section>}
           <div className="workbench">
             <section className="review-main" aria-label="Image and detections">
               <div className="viewer-toolbar">
@@ -542,7 +559,7 @@ export default function Home() {
                 <label htmlFor="export-scope" className="sr-only">Export scope</label>
                 <select id="export-scope" disabled={mode !== "general"} value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
                 <div className="review-actions"><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("json")}>Download JSON</Button><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("csv")}>Download CSV</Button></div>
-                <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes image metadata, coordinates and review decisions.")}</p>
+                <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes coordinates, review state, rule outcome, severity, and the full decision trace.")}</p>
               </section>
             </aside>
           </div>
@@ -565,11 +582,28 @@ export default function Home() {
             <div><span>Mean inference</span><strong>{completedBatch.length ? number(batchMeanLatency) + " ms" : "—"}</strong></div>
           </div>
           {batch.length ? <>
-            <div className="batch-table-scroll"><table className="batch-table"><thead><tr><th>Image</th><th>Status</th><th>Findings ≥ {threshold}%</th><th>Inference</th><th>Action</th></tr></thead>
-              <tbody>{batch.map(item => <tr key={item.id}><td><strong title={item.name}>{item.name}</strong><span>{number(item.width)} × {number(item.height)} px</span></td><td><span className={`batch-status ${item.status}`}>{item.status === "complete" ? "Complete" : item.status === "running" ? "Inspecting" : item.status === "failed" ? "Needs retry" : "Queued"}</span>{item.error && <small title={item.error}>{item.error}</small>}</td><td className="mono">{item.run ? item.run.detections.filter(detection => detection.confidence * 100 >= threshold).length : "—"}</td><td className="mono">{item.run ? number(item.run.inferenceMs) + " ms" : "—"}</td><td><Button variant="outline" size="sm" disabled={!item.run || batchRunning} onClick={() => openBatchResult(item)}>Open review</Button></td></tr>)}</tbody>
+            <div className="batch-table-scroll"><table className="batch-table"><thead><tr><th>Image</th><th>Status</th><th>Findings ≥ {threshold}%</th><th>Decision</th><th>Inference</th><th>Action</th></tr></thead>
+              <tbody>{batch.map(item => {
+                const decision = item.run ? applyDemoRules(item.run.detections) : null;
+                return <tr key={item.id}><td><strong title={item.name}>{item.name}</strong><span>{number(item.width)} × {number(item.height)} px</span></td><td><span className={`batch-status ${item.status}`}>{item.status === "complete" ? "Complete" : item.status === "running" ? "Inspecting" : item.status === "failed" ? "Needs retry" : "Queued"}</span>{item.error && <small title={item.error}>{item.error}</small>}</td><td className="mono">{item.run ? item.run.detections.filter(detection => detection.confidence * 100 >= threshold).length : "—"}</td><td>{decision ? <span className={`decision-badge ${decision.outcome.toLowerCase()}`}>{decision.outcome}</span> : "—"}</td><td className="mono">{item.run ? number(item.run.inferenceMs) + " ms" : "—"}</td><td><Button variant="outline" size="sm" disabled={!item.run || batchRunning} onClick={() => openBatchResult(item)}>Open review</Button></td></tr>;
+              })}</tbody>
             </table></div>
-            <div className="batch-footer"><p>Exports include image metadata, pixel coordinates, confidence, timing, and any saved reviewer decisions.</p><div><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("json")}>Download batch JSON</Button><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("csv")}>Download batch CSV</Button><Button variant="outline" disabled={batchRunning} onClick={clearBatch}>Clear batch</Button></div></div>
+            <div className="batch-footer"><p>Exports include image metadata, coordinates, confidence, timing, reviewer corrections, and the deterministic rule decision.</p><div><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("json")}>Download batch JSON</Button><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("csv")}>Download batch CSV</Button><Button variant="outline" disabled={batchRunning} onClick={clearBatch}>Clear batch</Button></div></div>
           </> : <div className="batch-empty"><strong>No images queued</strong><p>Add PNG, JPEG, or WebP images. Processing stays in this browser; files are not uploaded to a server.</p><Button onClick={() => batchInputRef.current?.click()}>Choose images</Button></div>}
+        </TabsContent>
+        <TabsContent value="decision" className="decision-workspace">
+          <div className="decision-heading"><div><p className="breadcrumb">Deterministic inspection logic</p><h2>Rules & decision trace</h2><p>Detector findings are qualified, evaluated, and resolved with the same versioned policy on every run. Display filters never change the inspection decision.</p></div><span className="policy-version">Schema v{DEMO_RULE_SET.schemaVersion} · Policy {DEMO_RULE_SET.version}</span></div>
+          <div className="decision-grid">
+            <section className="policy-panel"><div className="panel-heading"><div><span>ACTIVE HAND-WRITTEN POLICY</span><h3>{DEMO_RULE_SET.name}</h3></div><span>{DEMO_RULE_SET.rules.length} rules</span></div><p className="policy-note">{DEMO_RULE_SET.description}</p>
+              <ol className="policy-rules">{DEMO_RULE_SET.rules.map(rule => <li key={rule.id}><div><strong>{rule.description}</strong><span className="mono">{rule.id}</span></div><div><span className={`decision-badge ${configuredOutcome(rule).toLowerCase()}`}>{configuredOutcome(rule)}</span><small>{rule.type} · {rule.severity}</small></div></li>)}</ol>
+            </section>
+            <section className="live-decision-panel"><div className="panel-heading"><div><span>CURRENT IMAGE</span><h3>Inspection disposition</h3></div></div>
+              {inspectionDecision ? <><div className={`large-decision ${inspectionDecision.outcome.toLowerCase()}`}><span>{inspectionDecision.outcome}</span><small>{inspectionDecision.severity} severity</small></div><p>{inspectionDecision.summary}</p><dl className="properties decision-properties"><div><dt>Actionable findings</dt><dd>{inspectionDecision.evidence.actionableDetectionIds.length}</dd></div><div><dt>Waiting for review</dt><dd>{inspectionDecision.evidence.reviewDetectionIds.length}</dd></div><div><dt>Excluded findings</dt><dd>{inspectionDecision.evidence.excludedDetectionIds.length}</dd></div><div><dt>Precedence</dt><dd>FAIL › REVIEW › PASS</dd></div></dl></> : <div className="decision-empty"><strong>No decision yet</strong><p>Run detection to evaluate the current image against this policy.</p></div>}
+            </section>
+          </div>
+          {inspectionDecision && <section className="trace-panel"><div className="panel-heading"><div><span>ORDERED AUDIT TRAIL</span><h3>Why this image is {inspectionDecision.outcome.toLowerCase()}</h3></div><span>{inspectionDecision.trace.length} steps</span></div>
+            <ol className="decision-trace">{inspectionDecision.trace.map(entry => <li key={entry.step} className={entry.status}><span className="trace-step">{String(entry.step).padStart(2, "0")}</span><div><div className="trace-title"><strong>{entry.code.replaceAll("_", " ")}</strong><span className={`decision-badge ${entry.outcome.toLowerCase()}`}>{entry.outcome}</span><span className="severity-label">{entry.severity}</span></div><p>{entry.message}</p><small>{entry.ruleId ? `Rule ${entry.ruleId}` : "Engine decision"}{entry.detectionIds.length ? ` · Findings ${entry.detectionIds.map(id => "#" + id).join(", ")}` : ""}</small></div></li>)}</ol>
+          </section>}
         </TabsContent>
         <TabsContent value="evaluation" className="evaluation">
           <div className="evaluation-heading"><p className="breadcrumb">Operational evidence</p><h2>Model & performance</h2><p>Live runtime statistics are separated from validation metrics so a client can see what is measured and what is not.</p></div>
@@ -580,6 +614,7 @@ export default function Home() {
             <div><dt>Total processing</dt><dd>{mode === "general" && run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
             <div><dt>Completed</dt><dd>{mode === "general" && run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
             <div><dt>Review decisions</dt><dd>{mode === "general" ? accepted + " accepted / " + dismissed + " dismissed" : "Not available"}</dd></div>
+            <div><dt>Rule decision</dt><dd>{mode === "general" && inspectionDecision ? inspectionDecision.outcome + " / " + inspectionDecision.severity : "Not run"}</dd></div>
           </dl><p className="secondary-copy">Total processing includes model loading on the first run. Images remain local to this device.</p></section>
           <section><h3>PCB detector validation</h3><div className="metric-grid"><div><span>Precision</span><strong>69.9%</strong></div><div><span>Recall</span><strong>66.2%</strong></div><div><span>F1</span><strong>68.0%</strong></div><div><span>mAP@0.5</span><strong>69.4%</strong></div></div>
             <p className="secondary-copy">YOLOX-Nano trained on 7,357 DsPCBSD+ training images and measured on 851 validation images. The frozen test split remains sealed.</p>

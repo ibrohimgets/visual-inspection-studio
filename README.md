@@ -26,8 +26,9 @@ client-specific defect detector without rebuilding the operator workflow.
 | Real inference | Official YOLOX-Nano ONNX model, ONNX Runtime Web, no mocked boxes |
 | Clear localization | Selectable boxes, labels, confidence, pixel coordinates, and region zoom |
 | Human review | Accept, reject, reset, notes, and unsaved-change protection |
+| Deterministic decisions | Versioned hand-written rules produce PASS, FAIL, or REVIEW with an ordered decision trace |
 | Batch inspection | Up to 12 local images per browser queue with per-image status and latency |
-| Inspection reports | Safe JSON and CSV export with model provenance, timings, coordinates, filters, and decisions |
+| Inspection reports | Safe JSON and CSV export with model provenance, timings, coordinates, review state, rule outcome, and trace |
 | Operational visibility | Model version, execution provider, inference time, total time, and review counts |
 | Client adaptation | Reproducible train/validation pipeline and a documented ONNX integration boundary |
 
@@ -35,9 +36,12 @@ client-specific defect detector without rebuilding the operator workflow.
 flowchart LR
   A[Image or batch] --> B[YOLOX inference worker]
   B --> C[Boxes and confidence]
-  C --> D[Region zoom]
-  D --> E[Human accept / reject / note]
-  E --> F[JSON or CSV report]
+  C --> D[Deterministic rule engine]
+  C --> E[Region zoom]
+  E --> F[Human accept / reject / note]
+  F --> D
+  D --> G[PASS / FAIL / REVIEW + trace]
+  G --> H[JSON or CSV report]
 ```
 
 ## What works today
@@ -58,6 +62,27 @@ its ONNX export and decoder are verified end to end.
 
 This distinction is deliberate: the interface never relabels generic COCO
 predictions as industrial defects and never displays fabricated results.
+
+### Deterministic inspection rules
+
+The current workflow applies a hand-written, versioned rule schema after
+detection. It supports class-specific outcomes and severity, maximum defect
+counts, confidence-based review bands, reviewer corrections, and unsupported
+requirements. Conflicts always resolve as `FAIL > REVIEW > PASS`, and every
+report contains the ordered reasoning trace.
+
+The hosted COCO mode uses a clearly labelled object-presence demonstration
+policy. A separate PCB example shows the contract intended for a future
+client-specific detector. Neither policy is presented as a real factory's
+acceptance specification. See [`inspection/README.md`](inspection/README.md),
+the [JSON schema](inspection/rule-schema.v1.json), and the executable examples:
+
+```bash
+npm run rules:examples
+```
+
+PDF/LLM rule extraction is deliberately deferred. A future extractor must emit
+and validate this same schema before its rules can reach the engine.
 
 ## Measured detector evidence
 
@@ -156,6 +181,7 @@ and local reports stay under ignored `reports/local/` paths.
 
 ```text
 app/          Inspection and batch-review interface
+inspection/   Versioned rule schema and hand-written example policies
 lib/          Browser inference, reporting, evaluation, and routing logic
 detector/     Reproducible detector training and validation pipelines
 evaluation/   Dataset manifest and split-integrity documentation

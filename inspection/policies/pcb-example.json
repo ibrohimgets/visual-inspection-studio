@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "pcb-example-policy",
+  "name": "PCB acceptance policy example",
+  "version": "1.0.0",
+  "description": "Hand-written example rules for demonstrating the deterministic engine. A client must approve real production limits.",
+  "defaultOutcome": "PASS",
+  "defaultSeverity": "none",
+  "rules": [
+    {
+      "id": "pcb-confidence-review",
+      "type": "confidence-review",
+      "description": "unconfirmed PCB findings between 30% and 70% confidence",
+      "severity": "major",
+      "ignoreBelow": 0.3,
+      "reviewBelow": 0.7
+    },
+    {
+      "id": "critical-circuit-defects",
+      "type": "defect-class",
+      "description": "the example critical-circuit class rule",
+      "severity": "critical",
+      "classes": ["SH", "OP"],
+      "outcome": "FAIL"
+    },
+    {
+      "id": "conductor-scratch-review",
+      "type": "defect-class",
+      "description": "the conductor-scratch review rule",
+      "severity": "major",
+      "classes": ["CS"],
+      "outcome": "REVIEW"
+    },
+    {
+      "id": "example-cosmetic-allowance",
+      "type": "defect-class",
+      "description": "the example acceptable cosmetic class rule",
+      "severity": "minor",
+      "classes": ["SP"],
+      "outcome": "PASS"
+    },
+    {
+      "id": "maximum-total-defects",
+      "type": "maximum-defect-count",
+      "description": "no more than two actionable PCB defects are permitted",
+      "severity": "major",
+      "maximumAllowed": 2,
+      "outcome": "FAIL"
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visual-inspection-studio.local/schemas/inspection-rule-set.v1.json",
+  "title": "Visual Inspection Studio deterministic rule set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "description",
+    "defaultOutcome",
+    "defaultSeverity",
+    "rules"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "$ref": "#/$defs/text" },
+    "version": { "$ref": "#/$defs/text" },
+    "description": { "$ref": "#/$defs/text" },
+    "defaultOutcome": { "$ref": "#/$defs/outcome" },
+    "defaultSeverity": { "$ref": "#/$defs/severity" },
+    "rules": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/defectClassRule" },
+          { "$ref": "#/$defs/maximumDefectCountRule" },
+          { "$ref": "#/$defs/confidenceReviewRule" },
+          { "$ref": "#/$defs/unsupportedRule" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "outcome": {
+      "enum": ["PASS", "FAIL", "REVIEW"]
+    },
+    "severity": {
+      "enum": ["none", "info", "minor", "major", "critical"]
+    },
+    "ruleSeverity": {
+      "enum": ["info", "minor", "major", "critical"]
+    },
+    "classes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "ruleBase": {
+      "type": "object",
+      "required": ["id", "type", "description", "severity"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "type": "string" },
+        "description": { "$ref": "#/$defs/text" },
+        "severity": { "$ref": "#/$defs/ruleSeverity" }
+      }
+    },
+    "defectClassRule": {
+      "allOf": [
+        { "$ref": "#/$defs/ruleBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "description", "severity", "classes", "outcome"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "defect-class" },
+            "description": { "$ref": "#/$defs/text" },
+            "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "classes": { "$ref": "#/$defs/classes" },
+            "outcome": { "$ref": "#/$defs/outcome" }
+          }
+        }
+      ]
+    },
+    "maximumDefectCountRule": {
+      "allOf": [
+        { "$ref": "#/$defs/ruleBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "description", "severity", "maximumAllowed", "outcome"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "maximum-defect-count" },
+            "description": { "$ref": "#/$defs/text" },
+            "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "classes": { "$ref": "#/$defs/classes" },
+            "maximumAllowed": { "type": "integer", "minimum": 0 },
+            "outcome": { "$ref": "#/$defs/outcome" }
+          }
+        }
+      ]
+    },
+    "confidenceReviewRule": {
+      "allOf": [
+        { "$ref": "#/$defs/ruleBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "description", "severity", "ignoreBelow", "reviewBelow"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "confidence-review" },
+            "description": { "$ref": "#/$defs/text" },
+            "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "classes": { "$ref": "#/$defs/classes" },
+            "ignoreBelow": { "type": "number", "minimum": 0, "maximum": 1 },
+            "reviewBelow": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          }
+        }
+      ]
+    },
+    "unsupportedRule": {
+      "allOf": [
+        { "$ref": "#/$defs/ruleBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "description", "severity", "sourceType", "statement", "reason"],
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "type": { "const": "unsupported" },
+            "description": { "$ref": "#/$defs/text" },
+            "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "sourceType": { "$ref": "#/$defs/text" },
+            "statement": { "$ref": "#/$defs/text" },
+            "reason": { "$ref": "#/$defs/text" }
+          }
+        }
+      ]
+    }
+  }
+}

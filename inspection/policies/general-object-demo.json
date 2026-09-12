@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "general-object-safety-demo",
+  "name": "Restricted-area object policy",
+  "version": "1.0.0",
+  "description": "Demonstration-only rules for the hosted COCO detector. These are object-presence rules, not PCB defect specifications.",
+  "defaultOutcome": "PASS",
+  "defaultSeverity": "none",
+  "rules": [
+    {
+      "id": "unconfirmed-confidence-band",
+      "type": "confidence-review",
+      "description": "unconfirmed findings between 30% and 65% confidence",
+      "severity": "minor",
+      "ignoreBelow": 0.3,
+      "reviewBelow": 0.65
+    },
+    {
+      "id": "person-in-restricted-frame",
+      "type": "defect-class",
+      "description": "the prohibited person-in-frame rule",
+      "severity": "critical",
+      "classes": ["person"],
+      "outcome": "FAIL"
+    },
+    {
+      "id": "foreign-animal",
+      "type": "defect-class",
+      "description": "the foreign-animal rule",
+      "severity": "major",
+      "classes": ["dog", "cat", "bird"],
+      "outcome": "FAIL"
+    },
+    {
+      "id": "vehicle-presence",
+      "type": "defect-class",
+      "description": "the vehicle-presence confirmation rule",
+      "severity": "major",
+      "classes": ["car", "bus", "truck"],
+      "outcome": "REVIEW"
+    },
+    {
+      "id": "restricted-object-count",
+      "type": "maximum-defect-count",
+      "description": "no more than two restricted objects may be present",
+      "severity": "critical",
+      "classes": ["person", "dog", "cat", "bird", "car", "bus", "truck"],
+      "maximumAllowed": 2,
+      "outcome": "FAIL"
+    }
+  ]
+}

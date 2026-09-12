@@ -1,5 +1,6 @@
 import { YOLOX_BACKEND, YOLOX_CLASSES, YOLOX_INPUT_SIZE, YOLOX_MIN_SCORE, YOLOX_MODEL } from "./detectors/yolox.ts";
 import type { Detection } from "./detectors/types.ts";
+import type { InspectionDecision } from "./inspection-rules.ts";
 
 // Compatibility exports keep the public API and deployed YOLOX behavior stable
 // while new detectors implement the model-agnostic backend contract.
@@ -42,11 +43,12 @@ export function rgbaToBgr(data: Uint8ClampedArray) {
   return YOLOX_BACKEND.preprocess(data);
 }
 
-export function createReport(image: ImageInfo, run: Run, items: Detection[], filters: object, scope: string, mode = "general-object") {
-  return { schemaVersion: 1, exportedAt: new Date().toISOString(), image, mode,
+export function createReport(image: ImageInfo, run: Run, items: Detection[], filters: object, scope: string,
+  mode = "general-object", inspectionDecision: InspectionDecision | null = null) {
+  return { schemaVersion: 2, exportedAt: new Date().toISOString(), image, mode,
     model: MODEL, run: { completedAt: run.completedAt, inferenceMs: run.inferenceMs,
       totalMs: run.totalMs, executionProvider: "wasm", candidateFloor: MIN_SCORE, nmsIou: 0.45 },
-    scope, filters, coordinateSystem: "original-image-pixels-xywh",
+    scope, filters, coordinateSystem: "original-image-pixels-xywh", inspectionDecision,
     detections: items.map(item => ({ ...item, confidence: Number(item.confidence.toFixed(6)),
       x: Number(item.x.toFixed(2)), y: Number(item.y.toFixed(2)),
       width: Number(item.width.toFixed(2)), height: Number(item.height.toFixed(2)) })) };
@@ -59,9 +61,15 @@ export function csvCell(value: string | number) {
   return '"' + safe.replaceAll('"', '""') + '"';
 }
 export function reportCsv(report: ReturnType<typeof createReport>) {
-  const header = "file,image_width,image_height,model,completed_at,inference_ms,coordinate_system,id,label,confidence,x,y,width,height,review,note";
-  return [header, ...report.detections.map(item => [report.image.name, report.image.width,
+  const header = "file,image_width,image_height,model,completed_at,inference_ms,coordinate_system,inspection_outcome,inspection_severity,policy_id,policy_version,decision_reason,id,label,confidence,x,y,width,height,review,note";
+  const decision = report.inspectionDecision;
+  const shared = [report.image.name, report.image.width,
     report.image.height, report.model.name, report.run.completedAt, report.run.inferenceMs,
-    report.coordinateSystem, item.id, item.label, item.confidence, item.x, item.y, item.width,
-    item.height, item.review, item.note].map(csvCell).join(","))].join("\r\n");
+    report.coordinateSystem, decision?.outcome ?? "", decision?.severity ?? "", decision?.policy.id ?? "",
+    decision?.policy.version ?? "", decision?.summary ?? ""];
+  const rows = report.detections.length
+    ? report.detections.map(item => [...shared, item.id, item.label, item.confidence, item.x, item.y, item.width,
+      item.height, item.review, item.note].map(csvCell).join(","))
+    : [[...shared, "", "", "", "", "", "", "", "", ""].map(csvCell).join(",")];
+  return [header, ...rows].join("\r\n");
 }
