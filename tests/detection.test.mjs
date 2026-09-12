@@ -56,6 +56,7 @@ test("export records model provenance, actual timing, review state and safe CSV"
   const detection = item({ review: "accepted", note: '=SUM(A1), "quoted"\nsecond line' });
   const run = { detections: [detection], inferenceMs: 127, totalMs: 999, completedAt: "2026-09-12T00:00:00.000Z" };
   const report = createReport({ name: "photo.jpg", width: 800, height: 600, source: "upload" }, run, [detection], {}, "all");
+  assert.equal(report.mode, "general-object");
   assert.equal(report.coordinateSystem, "original-image-pixels-xywh");
   assert.equal(report.run.inferenceMs, 127);
   assert.equal(report.detections[0].review, "accepted");

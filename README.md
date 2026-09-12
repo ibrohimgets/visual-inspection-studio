@@ -33,9 +33,11 @@ The review workflow supports:
 
 ## Defect-inspection direction
 
-The next mode is **Surface Defect Inspection**. It is intentionally not bundled
-with fake results: a useful defect detector must be trained or fine-tuned on a
-known product, camera setup, and defect taxonomy.
+The mode selector includes **Surface Defect Inspection**, but it is intentionally
+shown as **model required** rather than bundled with fake results. A useful
+defect detector must be trained or fine-tuned on a known product, camera setup,
+and defect taxonomy. Once connected, it can reuse the existing review, notes,
+filters, and export workflow.
 
 Our recommended production path is [Anomalib](https://github.com/open-edge-platform/anomalib)
 with an Apache-2.0 model such as PatchCore or PaDiM. Train it on approved

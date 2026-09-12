@@ -107,8 +107,8 @@ export function rgbaToBgr(data: Uint8ClampedArray) {
   return result;
 }
 
-export function createReport(image: ImageInfo, run: Run, items: Detection[], filters: object, scope: string) {
-  return { schemaVersion: 1, exportedAt: new Date().toISOString(), image,
+export function createReport(image: ImageInfo, run: Run, items: Detection[], filters: object, scope: string, mode = "general-object") {
+  return { schemaVersion: 1, exportedAt: new Date().toISOString(), image, mode,
     model: MODEL, run: { completedAt: run.completedAt, inferenceMs: run.inferenceMs,
       totalMs: run.totalMs, executionProvider: "wasm", candidateFloor: MIN_SCORE, nmsIou: 0.45 },
     scope, filters, coordinateSystem: "original-image-pixels-xywh",

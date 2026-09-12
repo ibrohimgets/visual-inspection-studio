@@ -20,10 +20,16 @@ declare global {
 }
 
 const SAMPLE = { name: "objects-sample.jpg", source: "sample" as const, width: 0, height: 0 };
+type WorkspaceMode = "general" | "surface-defect";
+const modeLabel: Record<WorkspaceMode, string> = {
+  general: "General Object Detection",
+  "surface-defect": "Surface Defect Inspection",
+};
 const percent = (value: number) => (value * 100).toFixed(1) + "%";
 const number = (value: number) => Math.round(value).toLocaleString();
 
 export default function Home() {
+  const [mode, setMode] = useState<WorkspaceMode>("general");
   const [image, setImage] = useState<ImageInfo>(SAMPLE);
   const [imageUrl, setImageUrl] = useState("/objects-sample.jpg");
   const [ready, setReady] = useState(false);
@@ -55,6 +61,15 @@ export default function Home() {
   const accepted = items.filter(item => item.review === "accepted").length;
   const dismissed = items.filter(item => item.review === "dismissed").length;
   const reviewed = accepted + dismissed;
+
+  function changeMode(next: WorkspaceMode) {
+    if (next === mode || !canReplace()) return;
+    clearResults();
+    setMode(next);
+    setNotice(next === "surface-defect"
+      ? "Surface defect mode selected. A trained domain model is required before inference."
+      : "General object detection mode selected.");
+  }
 
   useEffect(() => {
     // Cached images can finish loading before hydration attaches onLoad.
@@ -135,6 +150,7 @@ export default function Home() {
   }
 
   const runDetection = useCallback(async () => {
+    if (mode !== "general") throw new Error("Surface defect inspection is not configured yet. Train and export a domain-specific model before running it.");
     if (pending.current) throw new Error("An inspection is already running.");
     const element = imageRef.current;
     if (!ready || opening || !element?.naturalWidth) throw new Error("Wait for the image to finish loading.");
@@ -184,26 +200,29 @@ export default function Home() {
       if (ticket === revision.current) { setError(cause instanceof Error ? cause.message : "Detection failed."); setPhase(""); }
       throw cause;
     }
-  }, [ready, opening, threshold]);
+  }, [mode, ready, opening, threshold]);
 
   const actionRef = useRef(runDetection);
   useEffect(() => { actionRef.current = runDetection; }, [runDetection]);
   const dirtyRef = useRef(dirty);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => {
     if (!document.modelContext?.registerTool) return;
     const controller = new AbortController();
     const tool = {
       name: "run_object_detection", title: "Run object detection",
-      description: "Run YOLOX-Nano on the currently loaded image locally. Fails if unexported review changes would be discarded.",
+      description: "Run the active detection mode on the currently loaded image locally. The surface defect mode fails until a real domain model is configured.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       async execute(input: unknown) {
         if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length) throw new Error("Expected an empty object.");
         if (dirtyRef.current) throw new Error("Export review changes before running detection again.");
+        if (modeRef.current !== "general") throw new Error("Surface defect inspection is not configured yet. Train and export a domain-specific model first.");
         const result = await actionRef.current();
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-        return { status: "complete", model: MODEL.name, candidates: result.detections.length, inferenceMs: result.inferenceMs };
+        return { status: "complete", mode: "general-object", model: MODEL.name, candidates: result.detections.length, inferenceMs: result.inferenceMs };
       },
     };
     try { void Promise.resolve(document.modelContext.registerTool(tool, { signal: controller.signal })).catch(() => undefined); }
@@ -217,7 +236,7 @@ export default function Home() {
   }
   function exportResults(format: "json" | "csv") {
     if (!run) return;
-    const report = createReport(image, run, scope === "all" ? items : visible, { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope);
+    const report = createReport(image, run, scope === "all" ? items : visible, { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope, mode === "general" ? "general-object" : "surface-defect");
     const url = URL.createObjectURL(new Blob([format === "json" ? JSON.stringify(report, null, 2) : reportCsv(report)], {
       type: format === "json" ? "application/json" : "text/csv;charset=utf-8",
     }));
@@ -236,11 +255,12 @@ export default function Home() {
         <div className="header-meta">Computer vision workspace <span className="version">v0.2</span></div>
       </header>
       <div className="page-heading">
-        <div><p className="breadcrumb">Workspace / Object detection</p><h1>Inspection review</h1></div>
+        <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspection review</h1></div>
         <div className="heading-actions">
+          <label className="mode-picker"><span>Inspection mode</span><select aria-label="Inspection mode" value={mode} onChange={event => changeMode(event.target.value as WorkspaceMode)}><option value="general">General Object Detection</option><option value="surface-defect">Surface Defect Inspection</option></select></label>
           <Button variant="outline" onClick={loadSample} disabled={opening}>Load sample</Button>
           <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Open image"}</Button>
-          <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={!ready || busy || opening}>{busy ? phase : "Run detection"}</Button>
+          <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={mode !== "general" || !ready || busy || opening}>{mode !== "general" ? "Model required" : busy ? phase : "Run detection"}</Button>
           {busy && <Button variant="outline" onClick={() => { cancel(); setNotice("Detection cancelled. Previous results retained."); }}>Cancel</Button>}
         </div>
         <input ref={inputRef} type="file" className="sr-only" aria-label="Choose inspection image" accept="image/png,image/jpeg,image/webp"
@@ -251,8 +271,9 @@ export default function Home() {
       <Tabs defaultValue="review" className="workspace-tabs">
         <div className="tab-bar">
           <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="evaluation">Evaluation</TabsTrigger></TabsList>
-          <span className="tab-description">{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</span>
+          <span className="tab-description">{mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No results generated</>}</span>
         </div>
+        {mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured</strong><p>This workspace is ready for a trained defect model, but it will not invent scratches, dents, cracks, or rust results. Use General Object Detection for the working YOLOX demo.</p></div><a href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Review recommended model path</a></div>}
         <TabsContent value="review">
           <div className="workbench">
             <section className="review-main" aria-label="Image and detections">
@@ -291,54 +312,56 @@ export default function Home() {
                   </tr>)}</tbody>
                 </table>
                 {!visible.length && <div className="table-empty">
-                  <strong>{!run ? "Run detection to inspect this image" : !items.length ? "No objects detected" : "No detections match these filters"}</strong>
-                  <p>{!run ? "Use the sample or open a PNG, JPEG or WebP. Maximum 20 MB." : !items.length ? "Try an image with people, vehicles, animals or household items." : "Lower the confidence threshold or reset the class and review filters."}</p>
-                  {run && !!items.length && <button className="text-control" onClick={() => { setThreshold(10); setHiddenClasses([]); setReviewFilter("all"); }}>Reset filters</button>}
+                  <strong>{mode === "surface-defect" ? "No defect model configured" : !run ? "Run detection to inspect this image" : !items.length ? "No objects detected" : "No detections match these filters"}</strong>
+                  <p>{mode === "surface-defect" ? "This mode will stay empty until a real model trained for the target product is exported and connected." : !run ? "Use the sample or open a PNG, JPEG or WebP. Maximum 20 MB." : !items.length ? "Try an image with people, vehicles, animals or household items." : "Lower the confidence threshold or reset the class and review filters."}</p>
+                  {mode === "surface-defect" && <button className="text-control" onClick={() => changeMode("general")}>Switch to general object detection</button>}
+                  {mode === "general" && run && !!items.length && <button className="text-control" onClick={() => { setThreshold(10); setHiddenClasses([]); setReviewFilter("all"); }}>Reset filters</button>}
                 </div>}
               </div>
             </section>
             <aside className="inspector" aria-label="Detection inspector">
               <div className="inspector-title"><h2>Inspector</h2><span>{selected ? "#" + String(selected.id).padStart(2, "0") : "No selection"}</span></div>
-              {selected ? <section className="inspector-section">
+              {mode === "surface-defect" && <section className="inspector-section model-status"><div className="status-kicker">SURFACE DEFECT MODEL</div><h3>Not configured</h3><p>Connect a model trained for this product and camera setup before reviewing defect findings.</p><dl className="properties"><div><dt>Recommended</dt><dd>Anomalib PatchCore / PaDiM</dd></div><div><dt>Input</dt><dd>Customer-approved normal images</dd></div><div><dt>Output</dt><dd>Anomaly map + review region</dd></div></dl><a className="text-control" href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Model documentation</a></section>}
+              {mode === "general" && (selected ? <section className="inspector-section">
                 <div className="selected-heading"><h3>{selected.label}</h3><strong className="mono">{percent(selected.confidence)}</strong></div>
                 <dl className="properties"><div><dt>Source</dt><dd>{MODEL.name}</dd></div><div><dt>Position</dt><dd className="mono">{Math.round(selected.x)}, {Math.round(selected.y)} px</dd></div><div><dt>Dimensions</dt><dd className="mono">{Math.round(selected.width)} × {Math.round(selected.height)} px</dd></div></dl>
                 <label className="field-label" htmlFor="review-note">Review note</label>
                 <textarea id="review-note" placeholder="Record an observation…" value={selected.note} maxLength={1000} disabled={busy} onChange={event => updateItem(selected.id, { note: event.target.value })} />
                 <div className="review-actions">{(["accepted", "dismissed"] as Review[]).map(value => <Button key={value} variant={selected.review === value ? "default" : "outline"} aria-pressed={selected.review === value} disabled={busy} onClick={() => updateItem(selected.id, { review: value })}>{value === "accepted" ? "Accept" : "Dismiss"}</Button>)}</div>
                 {selected.review !== "pending" && <button className="text-control reset-review" disabled={busy} onClick={() => updateItem(selected.id, { review: "pending" })}>Mark as unreviewed</button>}
-              </section> : <section className="inspector-section inspector-empty"><p>{run ? "Select a detection in the image or table to review it." : "Detected objects will appear here after the first run."}</p></section>}
+              </section> : <section className="inspector-section inspector-empty"><p>{run ? "Select a detection in the image or table to review it." : "Detected objects will appear here after the first run."}</p></section>)}
               <section className="inspector-section filters">
                 <div className="section-label"><h3>Display filters</h3><button className="text-control" onClick={() => { setThreshold(30); setHiddenClasses([]); setReviewFilter("all"); }}>Reset</button></div>
                 <label className="range-label" htmlFor="confidence">Minimum confidence <output>{threshold}%</output></label>
-                <input id="confidence" aria-label="Minimum confidence" type="range" min={10} max={95} step={1} value={threshold} onChange={event => setThreshold(Number(event.target.value))} />
+                <input id="confidence" aria-label="Minimum confidence" type="range" min={10} max={95} step={1} value={threshold} disabled={mode !== "general"} onChange={event => setThreshold(Number(event.target.value))} />
                 <div className="range-ends"><span>10%</span><span>95%</span></div>
                 <label className="field-label" htmlFor="review-filter">Review status</label>
-                <select id="review-filter" value={reviewFilter} onChange={event => setReviewFilter(event.target.value)}><option value="all">All detections</option><option value="pending">Unreviewed</option><option value="accepted">Accepted</option><option value="dismissed">Dismissed</option></select>
-                {classes.length > 0 && <fieldset className="class-filter"><legend>Object classes</legend>{classes.map(label => <label key={label}><input type="checkbox" checked={!hiddenClasses.includes(label)} onChange={event => setHiddenClasses(current => event.target.checked ? current.filter(item => item !== label) : [...current, label])} /><span>{label}</span><span className="class-count">{items.filter(item => item.label === label).length}</span></label>)}</fieldset>}
+                <select id="review-filter" disabled={mode !== "general"} value={reviewFilter} onChange={event => setReviewFilter(event.target.value)}><option value="all">All detections</option><option value="pending">Unreviewed</option><option value="accepted">Accepted</option><option value="dismissed">Dismissed</option></select>
+                {classes.length > 0 && <fieldset className="class-filter"><legend>Object classes</legend>{classes.map(label => <label key={label}><input type="checkbox" disabled={mode !== "general"} checked={!hiddenClasses.includes(label)} onChange={event => setHiddenClasses(current => event.target.checked ? current.filter(item => item !== label) : [...current, label])} /><span>{label}</span><span className="class-count">{items.filter(item => item.label === label).length}</span></label>)}</fieldset>}
               </section>
               <section className="inspector-section export-section">
                 <h3>Export results</h3>
                 <label htmlFor="export-scope" className="sr-only">Export scope</label>
-                <select id="export-scope" value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
-                <div className="review-actions"><Button variant="outline" disabled={!run || busy} onClick={() => exportResults("json")}>Export JSON</Button><Button variant="outline" disabled={!run || busy} onClick={() => exportResults("csv")}>Export CSV</Button></div>
+                <select id="export-scope" disabled={mode !== "general"} value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
+                <div className="review-actions"><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("json")}>Export JSON</Button><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("csv")}>Export CSV</Button></div>
                 <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes image metadata, coordinates and review decisions.")}</p>
               </section>
             </aside>
           </div>
         </TabsContent>
         <TabsContent value="evaluation" className="evaluation">
-          <div className="evaluation-heading"><p className="breadcrumb">Model & run details</p><h2>Measured results</h2><p>Inference timing and review counts come from the current image.</p></div>
+          <div className="evaluation-heading"><p className="breadcrumb">Model & run details</p><h2>Measured results</h2><p>{mode === "general" ? "Inference timing and review counts come from the current image." : "The defect mode reports setup status until a real domain model is connected."}</p></div>
           <div className="evaluation-grid"><section><h3>Current run</h3><dl className="properties">
-            <div><dt>Model</dt><dd>{MODEL.name} / {MODEL.version}</dd></div>
+            <div><dt>Model</dt><dd>{mode === "general" ? MODEL.name + " / " + MODEL.version : "Not configured"}</dd></div>
             <div><dt>Input resolution</dt><dd>416 × 416</dd></div>
-            <div><dt>Inference</dt><dd>{run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
-            <div><dt>Total processing</dt><dd>{run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
-            <div><dt>Completed</dt><dd>{run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
-            <div><dt>Review decisions</dt><dd>{accepted} accepted / {dismissed} dismissed</dd></div>
+            <div><dt>Inference</dt><dd>{mode === "general" && run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Total processing</dt><dd>{mode === "general" && run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Completed</dt><dd>{mode === "general" && run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
+            <div><dt>Review decisions</dt><dd>{mode === "general" ? accepted + " accepted / " + dismissed + " dismissed" : "Not available"}</dd></div>
           </dl><p className="secondary-copy">Total processing includes initial model loading when needed. Review decisions are observations, not measured model accuracy.</p></section>
           <section><h3>Accuracy evaluation</h3><p>No project validation dataset has been evaluated yet. Precision, recall and mAP will remain unreported until there are labelled ground-truth images and a reproducible evaluation.</p>
-            <h3 className="model-scope-title">Model scope</h3><p>The pretrained COCO model detects 80 everyday object categories. It does not detect scratches, dents or manufacturing defects. Those tasks require domain-specific training.</p>
-            <a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX source and model documentation</a>
+            <h3 className="model-scope-title">{mode === "general" ? "Model scope" : "Defect model plan"}</h3><p>{mode === "general" ? "The pretrained COCO model detects 80 everyday object categories. It does not detect scratches, dents or manufacturing defects. Those tasks require domain-specific training." : "Recommended next step: train Anomalib PatchCore or PaDiM on approved normal images, validate anomaly localization on labelled defects, then export a browser-compatible model. No defect result is generated before that step."}</p>
+            <a className="text-control" href={mode === "general" ? MODEL.source : "https://github.com/open-edge-platform/anomalib"} target="_blank" rel="noreferrer">{mode === "general" ? "YOLOX source and model documentation" : "Anomalib model documentation"}</a>
           </section></div>
         </TabsContent>
       </Tabs>
