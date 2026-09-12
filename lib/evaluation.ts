@@ -50,6 +50,7 @@ export type PredictionRecord = {
 export type DatasetManifest = {
   schemaVersion: 1;
   dataset: typeof DSPCBSD_PLUS | { id: string; title: string; license: string; classes: string[]; [key: string]: unknown };
+  imageRoot?: string;
   images: GroundTruthImage[];
 };
 

@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "evaluate": "node scripts/evaluate.mjs",
+    "prepare:dataset": "node scripts/prepare-dspcbsd.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
