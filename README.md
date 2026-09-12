@@ -103,6 +103,21 @@ The first benchmark domain is DsPCBSD+, a PCB surface-defect dataset with
 nine annotated categories. Its source and license are recorded in the harness;
 raw images and generated local reports remain outside Git by default.
 
+## Phase 2: zero/few-shot VLM contract
+
+The next layer is a strict, provider-neutral adapter in [`lib/vlm.ts`](lib/vlm.ts)
+with its protocol documented in [`vlm/README.md`](vlm/README.md). It supports
+zero-shot inspection and exactly 1-, 3-, or 5-shot support examples without
+pretending that a model score is a calibrated probability. Responses must use
+the frozen DsPCBSD+ labels, pixel-space boxes, evidence, and explicit
+uncertainty reasons. Every finding is routed to human review by default.
+
+This milestone intentionally does **not** bundle a hosted model, make up
+defect predictions, or change the browser YOLOX workflow. The next step is a
+local open-model gateway that implements this contract; only then can we record
+real zero/few-shot predictions against the frozen test split and measure
+localization, calibration, abstention, and latency.
+
 ## Local development
 
 ```bash
