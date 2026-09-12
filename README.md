@@ -1,51 +1,82 @@
 # Visual Inspection Studio
 
-An interactive, client-facing workspace for reviewing computer-vision
-detections, confidence thresholds, evaluation metrics, and exportable results.
+Visual Inspection Studio is a browser-local review console for computer-vision
+results. It keeps the product work that matters after inference: confidence
+controls, human decisions, notes, audit-friendly exports, and measured run
+timing.
 
 [Open the private demo](https://visual-inspection-studio.iibrohimm.chatgpt.site)
 
 ![Synthetic metal inspection sample](public/synthetic-metal-inspection.png)
 
-## Why this project exists
+## Current release: real local YOLOX inference
 
-Computer-vision delivery is more than drawing boxes. A usable inspection
-workflow needs threshold controls, human review, measurable validation, clear
-failure handling, and structured exports. This project demonstrates that
-product layer in a polished web interface.
+The **General Object Detection** workflow runs the official YOLOX-Nano ONNX
+model in a Web Worker with ONNX Runtime Web. The model is pinned by SHA-256 in
+`lib/detection.ts`, and the browser verifies the downloaded bytes before
+inference. No image is uploaded to an API.
 
-## Features
+It can recognize the 80 COCO object categories, such as people, vehicles,
+animals, bottles, furniture, and electronics. It is a general-purpose object
+detector; it does **not** recognize scratches, dents, cracks, rust, or other
+manufacturing defects. The product deliberately says that limitation instead
+of presenting generic object predictions as industrial findings.
 
-- Image upload and drag-and-drop
-- Interactive detection overlays and finding selection
-- Adjustable confidence threshold
-- Class filters
-- Baseline-versus-model evaluation view
-- JSON and CSV export
-- Responsive desktop and mobile layout
-- Clear human-review and limitation messaging
+The review workflow supports:
 
-## Evidence policy
+- PNG, JPEG, and WebP upload or drag-and-drop (20 MB / 40 megapixel guardrails)
+- confidence threshold, class, and review-status filters
+- image and table selection with original-image-pixel coordinates
+- accept, dismiss, and reviewer notes for every finding
+- JSON and CSV exports with model provenance, timing, coordinates, and review state
+- a measured evaluation view that does not invent precision, recall, or mAP
 
-This first release is intentionally labeled **portfolio demo mode**:
+## Defect-inspection direction
 
-- The included metal component is a synthetic sample created for this project.
-- Detection output and evaluation metrics are representative interface data.
-- Uploaded images remain in the browser.
-- No production accuracy claim is made.
+The next mode is **Surface Defect Inspection**. It is intentionally not bundled
+with fake results: a useful defect detector must be trained or fine-tuned on a
+known product, camera setup, and defect taxonomy.
 
-The next technical milestone is to connect this interface to a versioned
-object-detection API and replace representative values with reproducible
-evaluation artifacts.
+Our recommended production path is [Anomalib](https://github.com/open-edge-platform/anomalib)
+with an Apache-2.0 model such as PatchCore or PaDiM. Train it on approved
+normal images from the target line, validate it on labelled defect images,
+then export a browser-compatible model and connect its anomaly map to this
+same review workflow. This is a better fit for many inspection lines than
+pretending a COCO detector understands surface damage.
 
-## Tech stack
+For a reproducible public benchmark, two useful CC BY 4.0 candidates are:
 
-- Vinext / React 19
-- TypeScript
-- Tailwind CSS
-- Radix-based UI primitives
-- Lucide icons
-- Cloudflare-compatible Sites build
+- [NEU-CLS](https://figshare.com/articles/dataset/NEU-CLS/28903550): 1,800
+  grayscale steel images across six defect classes. It is a classification
+  benchmark, so it is suitable for a future classifier or training reference,
+  not direct bounding-box inference.
+- [DsPCBSD+](https://figshare.com/articles/dataset/DsPCBSD_/24970329): PCB
+  images with manually annotated defect boxes across nine categories. It is a
+  stronger supervised detection benchmark, but its PCB domain should not be
+  represented as a metal-surface model.
+
+[KolektorSDD2](https://www.vicos.si/resources/kolektorsdd2/) is a valuable real
+industrial dataset, but its CC BY-NC-SA 4.0 terms are not appropriate for
+unrestricted commercial redistribution. It should only be used after the
+necessary permission is obtained.
+
+## Evidence and limitations
+
+- The included sample is a synthetic image used to make the workflow easy to
+  try. Its detections are produced by the pinned model, not hardcoded fixture
+  data.
+- Inference runs in a browser Web Worker using WASM. The UI reports the actual
+  model inference time and total processing time for the current device; the
+  first run can include model loading. A sample development run measured about
+  173 ms inference on the test machine, but this is not a performance promise.
+- Accuracy metrics remain unreported until a labelled validation set and a
+  repeatable evaluation script are added.
+- Images stay on the local device in this demo. Do not use it as the sole basis
+  for safety-critical or high-impact decisions.
+
+Potential client use cases include component presence checks, PPE or equipment
+review, visual triage, QA annotation, and a human-in-the-loop front end for a
+future customer-specific defect model.
 
 ## Local development
 
@@ -56,25 +87,25 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-## Production build
+Quality checks used before release:
 
 ```bash
+npm run typecheck
+npm test
+npm run lint
 npm run build
 ```
 
-## Planned model integration
+## Model and runtime attribution
 
-1. FastAPI inference endpoint returning boxes, labels, scores, and latency.
-2. Versioned model and dataset metadata in every result.
-3. Real baseline and fine-tuned evaluation reports.
-4. Batch upload with background processing.
-5. Saved review decisions and downloadable QA reports.
-
-## Responsible use
-
-Low-confidence findings require human review. A detection result must not be
-used as the sole basis for safety-critical or high-impact decisions.
+- [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) and the bundled
+  `public/models/yolox_nano.onnx` are distributed under Apache-2.0. The full
+  license text is included in `public/models/YOLOX-LICENSE.txt`.
+- [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) is used under
+  its MIT license. The relevant license text is included in
+  `public/models/ONNX-Runtime-LICENSE.txt`.
 
 ## License
 
-MIT
+MIT for this application code. Third-party model, runtime, and dataset terms
+remain applicable as described above.

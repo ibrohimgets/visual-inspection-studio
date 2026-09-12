@@ -1,390 +1,348 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  Box,
-  Check,
-  ChevronDown,
-  Download,
-  Gauge,
-  ImagePlus,
-  Layers3,
-  Play,
-  RotateCcw,
-  ScanSearch,
-  ShieldCheck,
-  Sparkles,
-  Upload,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-type Detection = {
-  id: number;
-  label: string;
-  confidence: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-};
+import { INPUT_SIZE, MODEL, createReport, reportCsv, rgbaToBgr, validateImageFile, visibleDetections } from "@/lib/detection";
+import type { Detection, ImageInfo, Review, Run } from "@/lib/detection";
 
 declare global {
   interface Document {
     modelContext?: {
-      registerTool: (
-        tool: {
-          name: string;
-          title: string;
-          description: string;
-          inputSchema: object;
-          annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
-          execute: (input: unknown) => unknown;
-        },
-        options?: { signal?: AbortSignal },
-      ) => void | Promise<void>;
+      registerTool: (tool: {
+        name: string; title: string; description: string; inputSchema: object;
+        annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
+        execute: (input: unknown) => unknown;
+      }, options?: { signal?: AbortSignal }) => void | Promise<void>;
     };
   }
 }
 
-const detections: Detection[] = [
-  { id: 1, label: "Scratch", confidence: 0.94, x: 23, y: 29, width: 22, height: 18, color: "#ffb547" },
-  { id: 2, label: "Dent", confidence: 0.87, x: 55, y: 61, width: 14, height: 18, color: "#38d9c5" },
-  { id: 3, label: "Oxidation", confidence: 0.72, x: 77, y: 42, width: 10, height: 12, color: "#f87171" },
-];
-
-const metrics = [
-  { label: "Precision", value: "92.4%", note: "validation set" },
-  { label: "Recall", value: "89.1%", note: "validation set" },
-  { label: "F1 score", value: "90.7%", note: "validation set" },
-  { label: "Avg latency", value: "84 ms", note: "p95 · 102 ms" },
-];
+const SAMPLE = { name: "objects-sample.jpg", source: "sample" as const, width: 0, height: 0 };
+const percent = (value: number) => (value * 100).toFixed(1) + "%";
+const number = (value: number) => Math.round(value).toLocaleString();
 
 export default function Home() {
-  const [threshold, setThreshold] = useState([65]);
-  const [imageUrl, setImageUrl] = useState("/synthetic-metal-inspection.png");
-  const [fileName, setFileName] = useState("synthetic-metal-inspection.png");
-  const [running, setRunning] = useState(false);
-  const [inspected, setInspected] = useState(true);
-  const [selected, setSelected] = useState<number | null>(1);
+  const [image, setImage] = useState<ImageInfo>(SAMPLE);
+  const [imageUrl, setImageUrl] = useState("/objects-sample.jpg");
+  const [ready, setReady] = useState(false);
+  const [run, setRun] = useState<Run | null>(null);
+  const [phase, setPhase] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [threshold, setThreshold] = useState(30);
+  const [hiddenClasses, setHiddenClasses] = useState<string[]>([]);
+  const [reviewFilter, setReviewFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [boxes, setBoxes] = useState(true);
+  const [scope, setScope] = useState("all");
+  const [dragging, setDragging] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const visible = useMemo(
-    () => (inspected ? detections.filter((item) => item.confidence * 100 >= threshold[0]) : []),
-    [threshold, inspected],
-  );
+  const imageRef = useRef<HTMLImageElement>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const blobRef = useRef<string | null>(null);
+  const revision = useRef(0);
+  const uploadRevision = useRef(0);
+  const pending = useRef<{ reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const busy = phase !== "";
+  const items = useMemo(() => run?.detections ?? [], [run]);
+  const visible = useMemo(() => visibleDetections(items, threshold, hiddenClasses, reviewFilter), [items, threshold, hiddenClasses, reviewFilter]);
+  const selected = visible.find(item => item.id === selectedId) ?? null;
+  const classes = Array.from(new Set(items.map(item => item.label))).sort();
+  const accepted = items.filter(item => item.review === "accepted").length;
+  const dismissed = items.filter(item => item.review === "dismissed").length;
+  const reviewed = accepted + dismissed;
 
   useEffect(() => {
-    const context = document.modelContext;
-    if (!context?.registerTool) return;
-    const lifecycle = new AbortController();
+    // Cached images can finish loading before hydration attaches onLoad.
+    let active = true;
+    const element = imageRef.current;
+    if (element?.complete && element.naturalWidth) queueMicrotask(() => {
+      if (!active) return;
+      setImage(current => ({ ...current, width: element.naturalWidth, height: element.naturalHeight }));
+      setReady(true);
+    });
+    return () => { active = false; };
+  }, [imageUrl]);
 
-    void Promise.resolve(
-      context.registerTool(
-        {
-          name: "run_demo_inspection",
-          title: "Run demo inspection",
-          description:
-            "Run the representative portfolio inspection and optionally set its confidence threshold.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              threshold: {
-                type: "number",
-                minimum: 40,
-                maximum: 95,
-                description: "Minimum confidence percentage.",
-              },
-            },
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: false, untrustedContentHint: false },
-          execute(input) {
-            const value =
-              typeof input === "object" &&
-              input !== null &&
-              "threshold" in input &&
-              typeof input.threshold === "number"
-                ? input.threshold
-                : 65;
-            if (value < 40 || value > 95) {
-              throw new Error("threshold must be between 40 and 95");
-            }
-            setThreshold([Math.round(value)]);
-            setInspected(true);
-            setSelected(1);
-            return {
-              status: "complete",
-              mode: "portfolio-demo",
-              threshold: Math.round(value),
-              findingCount: detections.filter(
-                (item) => item.confidence * 100 >= value,
-              ).length,
-            };
-          },
-        },
-        { signal: lifecycle.signal },
-      ),
-    ).catch(() => undefined);
-
-    return () => lifecycle.abort();
+  const cancel = useCallback(() => {
+    revision.current++;
+    workerRef.current?.terminate(); workerRef.current = null;
+    if (pending.current) {
+      clearTimeout(pending.current.timer);
+      pending.current.reject(new Error("Detection cancelled.")); pending.current = null;
+    }
+    setPhase("");
   }, []);
 
-  function chooseFile(file?: File) {
-    if (!file || !file.type.startsWith("image/")) return;
-    setImageUrl(URL.createObjectURL(file));
-    setFileName(file.name);
-    setInspected(false);
-    setSelected(null);
+  useEffect(() => () => {
+    uploadRevision.current++;
+    workerRef.current?.terminate();
+    if (pending.current) {
+      clearTimeout(pending.current.timer); pending.current.reject(new Error("Workspace closed."));
+    }
+    if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", protect);
+    return () => window.removeEventListener("beforeunload", protect);
+  }, [dirty]);
+
+  function clearResults() {
+    cancel(); setRun(null); setSelectedId(null); setHiddenClasses([]);
+    setReviewFilter("all"); setError(""); setNotice(""); setDirty(false);
+  }
+  function canReplace() {
+    return !dirty || window.confirm("This image has unexported review changes. Replace it and discard those changes?");
+  }
+  async function chooseFile(file?: File) {
+    if (!file) return;
+    const problem = validateImageFile(file);
+    if (problem) { setError(problem); return; }
+    if (!canReplace()) return;
+    const ticket = ++uploadRevision.current;
+    const url = URL.createObjectURL(file);
+    setOpening(true); setError("");
+    try {
+      const decoded = new Image(); decoded.src = url; await decoded.decode();
+      if (ticket !== uploadRevision.current) { URL.revokeObjectURL(url); return; }
+      if (decoded.naturalWidth * decoded.naturalHeight > 40_000_000) throw new Error("Choose an image smaller than 40 megapixels.");
+      clearResults();
+      if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+      blobRef.current = url;
+      setReady(false); setImageUrl(url);
+      setImage({ name: file.name, source: "upload", width: decoded.naturalWidth, height: decoded.naturalHeight });
+    } catch (cause) {
+      URL.revokeObjectURL(url);
+      if (ticket === uploadRevision.current) setError(cause instanceof Error && cause.message.includes("megapixels") ? cause.message : "This image could not be decoded. Try a different PNG, JPEG or WebP.");
+    } finally { if (ticket === uploadRevision.current) setOpening(false); }
+  }
+  function loadSample() {
+    if (!canReplace()) return;
+    uploadRevision.current++; setOpening(false); clearResults();
+    if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    blobRef.current = null;
+    if (imageUrl !== "/objects-sample.jpg") setReady(false);
+    setImageUrl("/objects-sample.jpg");
+    setImage(imageUrl === "/objects-sample.jpg" ? { ...SAMPLE, width: image.width, height: image.height } : SAMPLE);
+    setThreshold(30);
   }
 
-  function inspect() {
-    setRunning(true);
-    window.setTimeout(() => {
-      setRunning(false);
-      setInspected(true);
-      setSelected(1);
-    }, 650);
-  }
+  const runDetection = useCallback(async () => {
+    if (pending.current) throw new Error("An inspection is already running.");
+    const element = imageRef.current;
+    if (!ready || opening || !element?.naturalWidth) throw new Error("Wait for the image to finish loading.");
+    const ticket = ++revision.current;
+    const started = performance.now();
+    setError(""); setNotice(""); setPhase("Preparing image…");
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = INPUT_SIZE; canvas.height = INPUT_SIZE;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("Image processing is unavailable in this browser.");
+      const ratio = Math.min(INPUT_SIZE / element.naturalWidth, INPUT_SIZE / element.naturalHeight);
+      context.fillStyle = "rgb(114,114,114)"; context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
+      context.drawImage(element, 0, 0, Math.floor(element.naturalWidth * ratio), Math.floor(element.naturalHeight * ratio));
+      const data = rgbaToBgr(context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data);
+      const worker = workerRef.current ?? new Worker("/runtime/inference.worker.js", { type: "module" });
+      workerRef.current = worker;
+      const result = await new Promise<{ detections: Detection[]; inferenceMs: number }>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          worker.terminate(); workerRef.current = null; pending.current = null;
+          reject(new Error("Detection timed out. Try again or reload the page."));
+        }, 90_000);
+        pending.current = { reject, timer };
+        const finish = () => { clearTimeout(timer); pending.current = null; };
+        worker.onerror = (event) => {
+          console.error("Inference worker failed:", event.message);
+          finish(); worker.terminate(); workerRef.current = null;
+          reject(new Error("The detection engine could not start. Reload the page and try again."));
+        };
+        worker.onmessage = event => {
+          if (ticket !== revision.current) return;
+          if (event.data.type === "status") { setPhase(event.data.message); return; }
+          finish();
+          if (event.data.type === "error") {
+            worker.terminate(); workerRef.current = null; reject(new Error(event.data.message));
+          } else resolve(event.data);
+        };
+        worker.postMessage({ data, width: element.naturalWidth, height: element.naturalHeight }, [data.buffer]);
+      });
+      if (ticket !== revision.current) throw new Error("Detection cancelled.");
+      const completed: Run = { ...result, totalMs: Math.round(performance.now() - started), completedAt: new Date().toISOString() };
+      setRun(completed); setHiddenClasses([]); setReviewFilter("all");
+      setSelectedId(result.detections.find(item => item.confidence * 100 >= threshold)?.id ?? null);
+      setDirty(false); setPhase("");
+      return completed;
+    } catch (cause) {
+      if (ticket === revision.current) { setError(cause instanceof Error ? cause.message : "Detection failed."); setPhase(""); }
+      throw cause;
+    }
+  }, [ready, opening, threshold]);
 
-  function resetSample() {
-    setImageUrl("/synthetic-metal-inspection.png");
-    setFileName("synthetic-metal-inspection.png");
-    setThreshold([65]);
-    setInspected(true);
-    setSelected(1);
-  }
+  const actionRef = useRef(runDetection);
+  useEffect(() => { actionRef.current = runDetection; }, [runDetection]);
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => {
+    if (!document.modelContext?.registerTool) return;
+    const controller = new AbortController();
+    const tool = {
+      name: "run_object_detection", title: "Run object detection",
+      description: "Run YOLOX-Nano on the currently loaded image locally. Fails if unexported review changes would be discarded.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      async execute(input: unknown) {
+        if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length) throw new Error("Expected an empty object.");
+        if (dirtyRef.current) throw new Error("Export review changes before running detection again.");
+        const result = await actionRef.current();
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        return { status: "complete", model: MODEL.name, candidates: result.detections.length, inferenceMs: result.inferenceMs };
+      },
+    };
+    try { void Promise.resolve(document.modelContext.registerTool(tool, { signal: controller.signal })).catch(() => undefined); }
+    catch { /* Unsupported experimental browser registry. */ }
+    return () => controller.abort();
+  }, []);
 
-  function download(format: "json" | "csv") {
-    const payload =
-      format === "json"
-        ? JSON.stringify({ mode: "portfolio-demo", file: fileName, threshold: threshold[0] / 100, detections: visible }, null, 2)
-        : ["label,confidence,x,y,width,height", ...visible.map((d) => [d.label, d.confidence, d.x, d.y, d.width, d.height].join(","))].join("\n");
-    const blob = new Blob([payload], { type: format === "json" ? "application/json" : "text/csv" });
-    const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = `inspection-results.${format}`;
-    anchor.click();
-    URL.revokeObjectURL(anchor.href);
+  function updateItem(id: number, values: Partial<Pick<Detection, "review" | "note">>) {
+    setRun(current => current ? { ...current, detections: current.detections.map(item => item.id === id ? { ...item, ...values } : item) } : null);
+    setDirty(true); setNotice("");
+  }
+  function exportResults(format: "json" | "csv") {
+    if (!run) return;
+    const report = createReport(image, run, scope === "all" ? items : visible, { minimumConfidence: threshold / 100, hiddenClasses, review: reviewFilter }, scope);
+    const url = URL.createObjectURL(new Blob([format === "json" ? JSON.stringify(report, null, 2) : reportCsv(report)], {
+      type: format === "json" ? "application/json" : "text/csv;charset=utf-8",
+    }));
+    const anchor = document.createElement("a"); anchor.href = url;
+    anchor.download = image.name.replace(/\.[^.]+$/, "") + "-inspection." + format;
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    if (scope === "all") setDirty(false);
+    setNotice((scope === "all" ? items.length : visible.length) + " results exported as " + format.toUpperCase() + ".");
   }
 
   return (
-    <main className="min-h-screen bg-[#0d1116] text-[#e7edf3]">
-      <header className="border-b border-white/10 bg-[#11171e]">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-4 py-3 sm:px-7">
-          <div className="flex items-center gap-3">
-            <div className="grid size-8 place-items-center rounded-md bg-[#79b8ff] text-[#07111d]">
-              <ScanSearch className="size-5" />
-            </div>
-            <div>
-              <p className="text-[15px] font-semibold tracking-tight">Visual Inspection Studio</p>
-              <p className="text-xs text-[#8d9aa7]">Surface defect review · Line 01</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden items-center gap-2 border border-[#75d5c5]/25 bg-[#75d5c5]/8 px-2.5 py-1.5 font-mono text-[11px] text-[#9ae3d7] sm:flex">
-              <span className="size-1.5 rounded-full bg-[#75d5c5]" />
-              OFFLINE DEMO
-            </span>
-            <Button variant="outline" size="sm" className="border-white/15 bg-transparent text-[#c8d2dc] hover:bg-white/10 hover:text-white" onClick={resetSample}>
-              <RotateCcw /> Reset sample
-            </Button>
-          </div>
-        </div>
+    <main className="studio">
+      <header className="app-header">
+        <div className="wordmark">Visual Inspection <span>Studio</span></div>
+        <div className="header-meta">Computer vision workspace <span className="version">v0.2</span></div>
       </header>
-
-      <div className="technical-rule mx-auto flex max-w-[1500px] items-center justify-between px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#71808d] sm:px-7">
-        <span>Run 000184 · Camera C-04</span>
-        <span>12 Sep 2026 · 14:32:08 UTC</span>
-        <span className="hidden text-[#9ae3d7] sm:inline">System ready</span>
+      <div className="page-heading">
+        <div><p className="breadcrumb">Workspace / Object detection</p><h1>Inspection review</h1></div>
+        <div className="heading-actions">
+          <Button variant="outline" onClick={loadSample} disabled={opening}>Load sample</Button>
+          <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Open image"}</Button>
+          <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={!ready || busy || opening}>{busy ? phase : "Run detection"}</Button>
+          {busy && <Button variant="outline" onClick={() => { cancel(); setNotice("Detection cancelled. Previous results retained."); }}>Cancel</Button>}
+        </div>
+        <input ref={inputRef} type="file" className="sr-only" aria-label="Choose inspection image" accept="image/png,image/jpeg,image/webp"
+          onChange={event => { void chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
       </div>
-
-      <div className="mx-auto grid max-w-[1500px] gap-3 px-4 py-4 lg:grid-cols-[260px_minmax(0,1fr)_310px] sm:px-7">
-        <aside className="panel order-2 p-4 lg:order-1">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <p className="eyebrow">Inspection</p>
-              <h2 className="mt-1 text-lg font-semibold">Run settings</h2>
-            </div>
-            <Gauge className="size-5 text-[#79b8ff]" />
-          </div>
-
-          <button
-            className="group grid w-full place-items-center rounded-md border border-dashed border-white/20 bg-[#10161c] px-3 py-6 text-center transition hover:border-[#79b8ff]/60 hover:bg-[#79b8ff]/5"
-            onClick={() => inputRef.current?.click()}
-            onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}
-            onDragOver={(event) => event.preventDefault()}
-          >
-              <span className="grid size-10 place-items-center rounded-md bg-white/7 text-[#9aa7b4] group-hover:text-[#79b8ff]">
-              <ImagePlus className="size-5" />
-            </span>
-            <span className="mt-3 text-sm font-medium">Upload inspection image</span>
-            <span className="mt-1 text-xs text-[#7f938e]">PNG, JPG or WebP</span>
-          </button>
-          <input ref={inputRef} className="hidden" type="file" accept="image/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
-
-          <div className="mt-5 space-y-5">
-            <label className="block">
-              <span className="mb-2 flex items-center justify-between text-sm">
-                <span className="text-[#aeb9c3]">Model</span>
-                <ChevronDown className="size-4 text-[#72808d]" />
-              </span>
-              <select className="w-full rounded-md border border-white/12 bg-[#10161c] px-3 py-2.5 text-sm outline-none focus:border-[#79b8ff]/60" defaultValue="surface">
-                <option value="surface">Surface Defect v2</option>
-                <option value="generic">Generic Detector</option>
-              </select>
-            </label>
-
-            <div>
-              <div className="mb-3 flex items-center justify-between text-sm">
-                <span className="text-[#aeb9c3]">Confidence threshold</span>
-                <span className="font-mono text-[#79b8ff]">{threshold[0]}%</span>
+      {error && <div className="message error" role="alert"><span>{error}</span><button onClick={() => setError("")}>Dismiss</button></div>}
+      <div className="sr-only" role="status" aria-live="polite">{phase || notice}</div>
+      <Tabs defaultValue="review" className="workspace-tabs">
+        <div className="tab-bar">
+          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="evaluation">Evaluation</TabsTrigger></TabsList>
+          <span className="tab-description">{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</span>
+        </div>
+        <TabsContent value="review">
+          <div className="workbench">
+            <section className="review-main" aria-label="Image and detections">
+              <div className="viewer-toolbar">
+                <div className="file-heading"><strong title={image.name}>{image.name}</strong><span>{image.source === "sample" ? "Example image" : "Local image"}</span></div>
+                <button className="text-control" aria-pressed={boxes} onClick={() => setBoxes(value => !value)}>{boxes ? "Hide boxes" : "Show boxes"}</button>
               </div>
-              <Slider aria-label="Confidence threshold" min={40} max={95} step={1} value={threshold} onValueChange={(value) => setThreshold(value as number[])} className="[&_[data-slot=slider-range]]:bg-[#79b8ff] [&_[data-slot=slider-thumb]]:border-[#79b8ff]" />
-              <div className="mt-2 flex justify-between text-[11px] text-[#6f7d8a]"><span>40%</span><span>95%</span></div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-sm text-[#aeb9c3]">Defect classes</p>
-              <div className="space-y-2">
-                {["Scratch", "Dent", "Oxidation"].map((label, index) => (
-                  <label key={label} className="flex items-center justify-between rounded-md border border-white/6 bg-[#10161c] px-3 py-2 text-sm">
-                    <span className="flex items-center gap-2"><span className="size-2 rounded-full" style={{ background: detections[index].color }} />{label}</span>
-                    <input type="checkbox" defaultChecked className="accent-[#79b8ff]" />
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <Button className="mt-6 h-11 w-full rounded-md bg-[#79b8ff] font-semibold text-[#07111d] hover:bg-[#a0ccff]" onClick={inspect} disabled={running}>
-            {running ? <Activity className="animate-spin" /> : <Play />}
-            {running ? "Inspecting…" : "Run inspection"}
-          </Button>
-          <p className="mt-3 text-center text-[11px] leading-relaxed text-[#71808d]">Representative demo output. Connect a versioned model before production use.</p>
-        </aside>
-
-        <section className="order-1 min-w-0 lg:order-2">
-          <div className="panel overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{fileName}</p>
-                <p className="mt-0.5 text-xs text-[#7d8b98]">Synthetic sample · local browser processing</p>
-              </div>
-              <div className="flex items-center gap-3 font-mono text-[11px]">
-                <span className="text-[#aeb9c3]">{visible.length} findings</span>
-                <span className="text-[#9ae3d7]">84 ms</span>
-              </div>
-            </div>
-
-            <div className="relative grid min-h-[430px] place-items-center overflow-hidden bg-[#090d12] p-3 sm:min-h-[620px]">
-              <div className="inspection-grid absolute inset-0 opacity-20" />
-              <div className="absolute left-4 top-3 z-10 font-mono text-[10px] text-[#6f7d8a]">LIVE FRAME · 1920 × 1080</div>
-              <div className="absolute bottom-3 right-4 z-10 font-mono text-[10px] text-[#6f7d8a]">FIT TO VIEW · RGB</div>
-              <div className="relative z-10 max-h-[650px] max-w-full overflow-hidden rounded-sm border border-white/15 shadow-2xl">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imageUrl} alt="Metal component under visual inspection" className="block max-h-[650px] w-auto max-w-full object-contain" />
-                {visible.map((detection) => (
-                  <button
-                    key={detection.id}
-                    aria-label={`${detection.label}, ${Math.round(detection.confidence * 100)} percent confidence`}
-                    className="absolute border-2 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-white/70"
-                    style={{ left: `${detection.x}%`, top: `${detection.y}%`, width: `${detection.width}%`, height: `${detection.height}%`, borderColor: detection.color }}
-                    onClick={() => setSelected(detection.id)}
-                  >
-                    <span className="absolute -top-7 left-[-2px] whitespace-nowrap rounded-t-md px-2 py-1 text-[11px] font-semibold text-[#07110f]" style={{ background: detection.color }}>
-                      {detection.label} {Math.round(detection.confidence * 100)}%
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {!inspected && (
-                <div className="absolute inset-0 z-20 grid place-items-center bg-[#0d1116]/80 backdrop-blur-sm">
-                  <div className="text-center"><Upload className="mx-auto size-7 text-[#79b8ff]" /><p className="mt-3 font-medium">Image ready</p><p className="mt-1 text-sm text-[#8d9aa7]">Run inspection to generate demo findings.</p></div>
+              <div className={"image-viewport" + (dragging ? " drag-active" : "")}
+                onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+                onDrop={event => { event.preventDefault(); setDragging(false); void chooseFile(event.dataTransfer.files[0]); }}>
+                <div className="image-plane" style={{ "--image-ratio": image.width && image.height ? image.width / image.height : 4 / 3 } as CSSProperties}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img ref={imageRef} src={imageUrl} alt={"Inspection image: " + image.name} draggable={false}
+                    onLoad={event => { const el = event.currentTarget; setImage(current => ({ ...current, width: el.naturalWidth, height: el.naturalHeight })); setReady(true); }}
+                    onError={() => { setReady(false); setError("Unable to load this image. Open another image or reload the sample."); }} />
+                  {boxes && visible.map(item => <button key={item.id} className={"bounding-box " + item.review + (selectedId === item.id ? " selected" : "")}
+                    aria-label={"Select " + item.label + " " + item.id} aria-pressed={selectedId === item.id} disabled={busy} onClick={() => setSelectedId(item.id)}
+                    style={{ left: item.x / image.width * 100 + "%", top: item.y / image.height * 100 + "%", width: item.width / image.width * 100 + "%", height: item.height / image.height * 100 + "%" }}>
+                    <span>{String(item.id).padStart(2, "0")} {item.label} <b>{percent(item.confidence)}</b></span>
+                  </button>)}
                 </div>
-              )}
-            </div>
+                {dragging && <div className="drop-caption">Drop image to inspect</div>}
+                {busy && <div className="processing-status" role="status">{phase}</div>}
+              </div>
+              <div className="viewer-status"><span>{ready ? number(image.width) + " × " + number(image.height) + " px" : "Loading image…"}</span><span>{run ? number(run.inferenceMs) + " ms inference" : "Ready for detection"}</span><span>Fit to view</span></div>
+              <div className="results-heading"><h2>Detections <span>{visible.length}</span></h2><span>{run ? reviewed + " / " + items.length + " reviewed" : "No run yet"}</span></div>
+              <div className="table-scroll">
+                <table className="results-table">
+                  <thead><tr><th>ID</th><th>Object</th><th>Confidence</th><th>Region (px)</th><th>Review</th></tr></thead>
+                  <tbody>{visible.map(item => <tr key={item.id} className={selected?.id === item.id ? "selected-row" : ""}>
+                    <td className="mono">{String(item.id).padStart(2, "0")}</td>
+                    <td><button className="object-link" onClick={() => setSelectedId(item.id)} aria-label={"Review " + item.label + " " + item.id} disabled={busy}>{item.label}</button></td>
+                    <td className="confidence-cell"><span>{percent(item.confidence)}</span><div aria-hidden="true"><i style={{ width: item.confidence * 100 + "%" }} /></div></td>
+                    <td className="mono region-cell">{Math.round(item.x)}, {Math.round(item.y)} · {Math.round(item.width)} × {Math.round(item.height)}</td>
+                    <td><span className={"review-label " + item.review}>{item.review === "pending" ? "Unreviewed" : item.review}</span></td>
+                  </tr>)}</tbody>
+                </table>
+                {!visible.length && <div className="table-empty">
+                  <strong>{!run ? "Run detection to inspect this image" : !items.length ? "No objects detected" : "No detections match these filters"}</strong>
+                  <p>{!run ? "Use the sample or open a PNG, JPEG or WebP. Maximum 20 MB." : !items.length ? "Try an image with people, vehicles, animals or household items." : "Lower the confidence threshold or reset the class and review filters."}</p>
+                  {run && !!items.length && <button className="text-control" onClick={() => { setThreshold(10); setHiddenClasses([]); setReviewFilter("all"); }}>Reset filters</button>}
+                </div>}
+              </div>
+            </section>
+            <aside className="inspector" aria-label="Detection inspector">
+              <div className="inspector-title"><h2>Inspector</h2><span>{selected ? "#" + String(selected.id).padStart(2, "0") : "No selection"}</span></div>
+              {selected ? <section className="inspector-section">
+                <div className="selected-heading"><h3>{selected.label}</h3><strong className="mono">{percent(selected.confidence)}</strong></div>
+                <dl className="properties"><div><dt>Source</dt><dd>{MODEL.name}</dd></div><div><dt>Position</dt><dd className="mono">{Math.round(selected.x)}, {Math.round(selected.y)} px</dd></div><div><dt>Dimensions</dt><dd className="mono">{Math.round(selected.width)} × {Math.round(selected.height)} px</dd></div></dl>
+                <label className="field-label" htmlFor="review-note">Review note</label>
+                <textarea id="review-note" placeholder="Record an observation…" value={selected.note} maxLength={1000} disabled={busy} onChange={event => updateItem(selected.id, { note: event.target.value })} />
+                <div className="review-actions">{(["accepted", "dismissed"] as Review[]).map(value => <Button key={value} variant={selected.review === value ? "default" : "outline"} aria-pressed={selected.review === value} disabled={busy} onClick={() => updateItem(selected.id, { review: value })}>{value === "accepted" ? "Accept" : "Dismiss"}</Button>)}</div>
+                {selected.review !== "pending" && <button className="text-control reset-review" disabled={busy} onClick={() => updateItem(selected.id, { review: "pending" })}>Mark as unreviewed</button>}
+              </section> : <section className="inspector-section inspector-empty"><p>{run ? "Select a detection in the image or table to review it." : "Detected objects will appear here after the first run."}</p></section>}
+              <section className="inspector-section filters">
+                <div className="section-label"><h3>Display filters</h3><button className="text-control" onClick={() => { setThreshold(30); setHiddenClasses([]); setReviewFilter("all"); }}>Reset</button></div>
+                <label className="range-label" htmlFor="confidence">Minimum confidence <output>{threshold}%</output></label>
+                <input id="confidence" aria-label="Minimum confidence" type="range" min={10} max={95} step={1} value={threshold} onChange={event => setThreshold(Number(event.target.value))} />
+                <div className="range-ends"><span>10%</span><span>95%</span></div>
+                <label className="field-label" htmlFor="review-filter">Review status</label>
+                <select id="review-filter" value={reviewFilter} onChange={event => setReviewFilter(event.target.value)}><option value="all">All detections</option><option value="pending">Unreviewed</option><option value="accepted">Accepted</option><option value="dismissed">Dismissed</option></select>
+                {classes.length > 0 && <fieldset className="class-filter"><legend>Object classes</legend>{classes.map(label => <label key={label}><input type="checkbox" checked={!hiddenClasses.includes(label)} onChange={event => setHiddenClasses(current => event.target.checked ? current.filter(item => item !== label) : [...current, label])} /><span>{label}</span><span className="class-count">{items.filter(item => item.label === label).length}</span></label>)}</fieldset>}
+              </section>
+              <section className="inspector-section export-section">
+                <h3>Export results</h3>
+                <label htmlFor="export-scope" className="sr-only">Export scope</label>
+                <select id="export-scope" value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
+                <div className="review-actions"><Button variant="outline" disabled={!run || busy} onClick={() => exportResults("json")}>Export JSON</Button><Button variant="outline" disabled={!run || busy} onClick={() => exportResults("csv")}>Export CSV</Button></div>
+                <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes image metadata, coordinates and review decisions.")}</p>
+              </section>
+            </aside>
           </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {metrics.map((metric) => (
-              <div key={metric.label} className="panel p-4">
-                <p className="text-xs text-[#8795a2]">{metric.label}</p>
-                <div className="mt-2 flex items-end justify-between"><strong className="text-2xl tracking-tight">{metric.value}</strong><span className="font-mono text-[10px] text-[#71808d]">{metric.note}</span></div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <aside className="panel order-3 overflow-hidden">
-          <Tabs defaultValue="findings" className="h-full">
-            <TabsList variant="line" className="w-full justify-start gap-4 border-b border-white/10 px-4 pt-3">
-              <TabsTrigger value="findings" className="px-0 text-[#8d9aa7] data-[state=active]:text-white">Findings</TabsTrigger>
-              <TabsTrigger value="evaluation" className="px-0 text-[#8d9aa7] data-[state=active]:text-white">Evaluation</TabsTrigger>
-            </TabsList>
-            <TabsContent value="findings" className="p-4">
-              <div className="flex items-center justify-between">
-                <div><p className="eyebrow">Review queue</p><h2 className="mt-1 text-lg font-semibold">{visible.length} findings</h2></div>
-                <Layers3 className="size-5 text-[#79b8ff]" />
-              </div>
-              <div className="mt-4 space-y-2">
-                {visible.map((item) => (
-                  <button key={item.id} onClick={() => setSelected(item.id)} className={`w-full rounded-md border p-3 text-left transition ${selected === item.id ? "border-[#79b8ff]/55 bg-[#79b8ff]/8" : "border-white/8 bg-[#10161c] hover:bg-white/5"}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex gap-3"><span className="mt-0.5 grid size-8 place-items-center rounded-md bg-white/7"><Box className="size-4" style={{ color: item.color }} /></span><div><p className="text-sm font-medium">{item.label}</p><p className="mt-1 text-xs text-[#7d8b98]">Finding #{String(item.id).padStart(2, "0")}</p></div></div>
-                      <strong className="font-mono text-sm" style={{ color: item.color }}>{Math.round(item.confidence * 100)}%</strong>
-                    </div>
-                  </button>
-                ))}
-                {!visible.length && <div className="rounded-md border border-dashed border-white/12 p-5 text-center text-sm text-[#7c8a97]">No findings above this threshold.</div>}
-              </div>
-
-              <div className="mt-5 rounded-md border border-[#f4b75e]/25 bg-[#f4b75e]/7 p-3">
-                <div className="flex gap-2"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#f4b75e]" /><p className="text-xs leading-relaxed text-[#c8b68f]">Low-confidence findings should be reviewed by a person before downstream action.</p></div>
-              </div>
-
-              <div className="mt-5">
-                <p className="mb-2 text-xs font-medium text-[#95a7a2]">Export results</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" className="rounded-md border-white/12 bg-transparent text-[#c8d2dc] hover:bg-white/8 hover:text-white" onClick={() => download("json")}><Download /> JSON</Button>
-                  <Button variant="outline" className="rounded-md border-white/12 bg-transparent text-[#c8d2dc] hover:bg-white/8 hover:text-white" onClick={() => download("csv")}><Download /> CSV</Button>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="evaluation" className="p-4">
-              <p className="eyebrow">Validation split</p>
-              <h2 className="mt-1 text-lg font-semibold">Model comparison</h2>
-              <div className="mt-5 space-y-4">
-                {[["Fine-tuned model", 91, "#79b8ff"], ["Baseline", 79, "#768694"]].map(([label, value, color]) => (
-                  <div key={String(label)}>
-                    <div className="mb-2 flex justify-between text-sm"><span>{label}</span><strong>{value}%</strong></div>
-                    <div className="h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full" style={{ width: `${value}%`, background: color }} /></div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 grid grid-cols-2 gap-2">
-                {[["148", "Images"], ["37", "Defects"], ["3", "Classes"], ["0", "Leakage"]].map(([value, label]) => (
-                  <div key={label} className="rounded-md border border-white/6 bg-[#10161c] p-3"><strong className="text-lg">{value}</strong><p className="mt-1 text-xs text-[#74808d]">{label}</p></div>
-                ))}
-              </div>
-              <div className="mt-5 flex gap-2 rounded-md border border-[#79b8ff]/20 bg-[#79b8ff]/6 p-3">
-                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#79b8ff]" />
-                <p className="text-xs leading-relaxed text-[#afc4dc]">Representative portfolio metrics, labeled as demo data until connected to a versioned model evaluation.</p>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </aside>
-      </div>
-
-      <footer className="mx-auto flex max-w-[1500px] flex-col gap-2 px-7 pb-6 text-xs text-[#71808d] sm:flex-row sm:items-center sm:justify-between">
-        <span className="flex items-center gap-2"><Sparkles className="size-3.5" /> Synthetic sample image generated for demonstration.</span>
-        <span className="flex items-center gap-2"><Check className="size-3.5 text-[#75d5c5]" /> No uploaded image leaves your browser in this demo.</span>
-      </footer>
+        </TabsContent>
+        <TabsContent value="evaluation" className="evaluation">
+          <div className="evaluation-heading"><p className="breadcrumb">Model & run details</p><h2>Measured results</h2><p>Inference timing and review counts come from the current image.</p></div>
+          <div className="evaluation-grid"><section><h3>Current run</h3><dl className="properties">
+            <div><dt>Model</dt><dd>{MODEL.name} / {MODEL.version}</dd></div>
+            <div><dt>Input resolution</dt><dd>416 × 416</dd></div>
+            <div><dt>Inference</dt><dd>{run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Total processing</dt><dd>{run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Completed</dt><dd>{run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
+            <div><dt>Review decisions</dt><dd>{accepted} accepted / {dismissed} dismissed</dd></div>
+          </dl><p className="secondary-copy">Total processing includes initial model loading when needed. Review decisions are observations, not measured model accuracy.</p></section>
+          <section><h3>Accuracy evaluation</h3><p>No project validation dataset has been evaluated yet. Precision, recall and mAP will remain unreported until there are labelled ground-truth images and a reproducible evaluation.</p>
+            <h3 className="model-scope-title">Model scope</h3><p>The pretrained COCO model detects 80 everyday object categories. It does not detect scratches, dents or manufacturing defects. Those tasks require domain-specific training.</p>
+            <a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX source and model documentation</a>
+          </section></div>
+        </TabsContent>
+      </Tabs>
+      <footer className="app-footer"><span>Images are processed on this device. Export your results before leaving.</span><span>YOLOX-Nano · Apache-2.0</span></footer>
     </main>
   );
 }

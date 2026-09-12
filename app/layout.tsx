@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Visual Inspection Studio",
   description:
-    "Interactive computer-vision workspace for reviewing detections, confidence thresholds, evaluation metrics, and exports.",
+    "Run YOLOX object detection on your device, review predictions, and export annotated inspection results.",
   other: {
     "codex-preview": "development",
   },
