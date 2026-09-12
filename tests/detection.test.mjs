@@ -61,6 +61,7 @@ test("export records model provenance, actual timing, review state and safe CSV"
   assert.equal(report.run.inferenceMs, 127);
   assert.equal(report.detections[0].review, "accepted");
   assert.equal(report.model.sha256, MODEL.sha256);
+  assert.deepEqual(Object.keys(report.model), ["name", "version", "inputSize", "sha256", "source", "license"]);
   const csv = reportCsv(report);
   assert.ok(csv.includes('"\'=SUM(A1), ""quoted""\nsecond line"'));
   assert.ok(csv.includes('"800","600","YOLOX-Nano"'));

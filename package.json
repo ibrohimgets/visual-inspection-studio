@@ -21,6 +21,11 @@
     "vlm:experiments": "node scripts/run-vlm-experiments.mjs",
     "detector:tune": "node scripts/tune-detector.mjs",
     "detector:tune-classes": "node scripts/tune-class-thresholds.mjs",
+    "detector:yolov8:prepare": "python detector/yolov8/prepare_dataset.py",
+    "detector:yolov8:train": "python detector/yolov8/train.py",
+    "detector:yolov8:predict": "python detector/yolov8/predict.py --training-report reports/local/detector/yolov8n-pcb/runs/yolov8n-256-e5-s20260912/training-report.json",
+    "detector:yolov8:tune": "node scripts/tune-detector.mjs --predictions reports/local/detector/yolov8n-pcb/validation-predictions.json --output reports/local/detector/yolov8n-pcb/validation-thresholds.json",
+    "detector:compare": "node scripts/compare-detectors.mjs",
     "hybrid:validation": "node scripts/run-hybrid-validation.mjs",
     "db:generate": "drizzle-kit generate"
   },

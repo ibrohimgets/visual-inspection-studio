@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "experiment": "YOLOX-Nano vs isolated YOLOv8n",
+  "dataset": "DsPCBSD+",
+  "trainingSplit": "train",
+  "tuningSplit": "validation",
+  "testSplitAccessed": false,
+  "protocol": {
+    "trainImages": 7357,
+    "trainBoxes": 14563,
+    "validationImages": 851,
+    "validationBoxes": 1621,
+    "imageSize": 256,
+    "epochs": {
+      "yolox": 5,
+      "yolov8": 5
+    },
+    "seed": {
+      "yolox": 20260912,
+      "yolov8": 20260912
+    },
+    "proposalConfidenceFloor": 0.001,
+    "iouThreshold": 0.5,
+    "selectionRule": "Maximum class-aware F1 at IoU 0.5; ties prefer recall, then precision, then lower confidence threshold.",
+    "metricDefinition": "Micro class-aware P/R/F1 and 101-point class mean AP at IoU 0.5."
+  },
+  "detectors": [
+    {
+      "id": "yolox-nano-pcb",
+      "model": "YOLOX-Nano PCB",
+      "license": "Apache-2.0",
+      "inputSize": 256,
+      "epochs": 5,
+      "selectedConfidenceThreshold": 0.37,
+      "precision": 0.6985677083333334,
+      "recall": 0.661937075879087,
+      "f1": 0.6797592651251188,
+      "map50": 0.6940965892055138,
+      "latencyMsPerImage": 23.317735957651543,
+      "imagesPerSecond": 42.885810261174065,
+      "modelBytes": 7566026,
+      "parameterCount": 898314
+    },
+    {
+      "id": "yolov8n-pcb-256",
+      "model": "YOLOv8n PCB",
+      "license": "AGPL-3.0 / Ultralytics Enterprise",
+      "deploymentStatus": "isolated-experiment",
+      "inputSize": 256,
+      "epochs": 5,
+      "selectedConfidenceThreshold": 0.32,
+      "precision": 0.6502890173410405,
+      "recall": 0.5552128315854411,
+      "f1": 0.5990016638935108,
+      "map50": 0.6215151256904407,
+      "latencyMsPerImage": 14.325657461810541,
+      "imagesPerSecond": 69.80482415315376,
+      "modelBytes": 6200803,
+      "parameterCount": 3007403
+    }
+  ],
+  "candidateMinusBaseline": {
+    "precision": -0.04827869099229287,
+    "recall": -0.10672424429364591,
+    "f1": -0.08075760123160791,
+    "map50": -0.07258146351507311,
+    "latencyMsPerImage": -8.992078495841001,
+    "modelBytes": -1365223,
+    "parameterCount": 2109089
+  },
+  "notes": [
+    "Validation-only engineering comparison; no frozen-test or production claim.",
+    "Both runs use the same manifest split, 256px input, five epochs, and the same metric implementation.",
+    "Framework-native optimizers and augmentations differ, so this compares reproducible detector pipelines rather than architecture alone.",
+    "YOLOv8 remains isolated and is not loaded by the deployed application because its licensing decision is unresolved.",
+    "Wall-clock latency includes validation input loading; model size is the serialized training checkpoint size."
+  ]
+}

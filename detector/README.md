@@ -6,6 +6,12 @@ runs proposals on `validation`, and chooses an operating threshold using only
 validation metrics. The frozen `test` split is intentionally unavailable from
 the prediction CLI.
 
+The browser runtime now consumes a model-agnostic detector contract while
+keeping YOLOX as its only deployed/default backend. An isolated YOLOv8n
+training and validation path lives in [`yolov8/`](yolov8/README.md). Its
+Ultralytics dependency, downloaded weights, trained checkpoints, and generated
+dataset view are excluded from the hosted application and from Git.
+
 ## Reproducibility and licenses
 
 - Model: YOLOX-Nano, pinned to upstream commit
@@ -76,7 +82,36 @@ precision-first operating profile rather than a universal model improvement.
 Hard-negative retraining is deferred until the product workflow needs a larger
 accuracy gain; the frozen test split remains untouched.
 
-The next validation-only milestone routes detector scores from 0.29 through
+## Isolated YOLOv8n comparison
+
+The first candidate uses the same 7,357 training images, 851 validation images,
+nine-class ordering, 256 × 256 input size, five-epoch budget, and project
+evaluation code as the preserved YOLOX-Nano baseline. Prepare and run it with:
+
+```powershell
+npm run detector:yolov8:prepare
+npm run detector:yolov8:train
+npm run detector:yolov8:predict
+npm run detector:yolov8:tune
+npm run detector:compare
+```
+
+Every stage records `testSplitAccessed: false`; the preparation and prediction
+CLIs expose only `train` and `validation`. The tracked comparison contains
+metrics and provenance but no Ultralytics package code, upstream weights, or
+trained checkpoint.
+
+| Detector | Precision | Recall | F1 | mAP@0.5 | Wall latency | Parameters | Checkpoint |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| YOLOX-Nano | 69.86% | 66.19% | 67.98% | 69.41% | 23.32 ms/image | 898,314 | 7.22 MiB |
+| YOLOv8n | 65.03% | 55.52% | 59.90% | 62.15% | 14.33 ms/image | 3,007,403 | 5.91 MiB |
+
+At this five-epoch operating point, YOLOv8n trades lower latency for lower
+validation quality and does not replace YOLOX. The generated evidence and
+metric definitions are tracked in
+[`experiments/2026-09-12-yolox-vs-yolov8n-validation.md`](experiments/2026-09-12-yolox-vs-yolov8n-validation.md).
+
+A prior validation-only milestone routed detector scores from 0.29 through
 0.5999 to batched Terra crop verification. Its full protocol and negative
 result are recorded in
 [`experiments/2026-09-12-hybrid-validation.md`](experiments/2026-09-12-hybrid-validation.md):

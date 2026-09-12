@@ -81,6 +81,22 @@ The earlier Terra hybrid is retained as a negative baseline: it did not improve
 the automatic detector and added API cost. See
 [`detector/experiments/2026-09-12-hybrid-validation.md`](detector/experiments/2026-09-12-hybrid-validation.md).
 
+### Isolated backend comparison
+
+The application now has a model-agnostic detector contract. YOLOX remains the
+only deployed/default browser backend; YOLOv8n is kept in a separate training
+and evaluation path because its deployment license has not been selected.
+
+| Detector (256 px, 5 epochs) | Precision | Recall | F1 | mAP@0.5 | Wall latency | Checkpoint |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| YOLOX-Nano | 69.86% | 66.19% | 67.98% | 69.41% | 23.32 ms/image | 7.22 MiB |
+| YOLOv8n, isolated | 65.03% | 55.52% | 59.90% | 62.15% | 14.33 ms/image | 5.91 MiB |
+
+This first controlled YOLOv8n run is faster, but it does not beat the YOLOX
+quality baseline. It therefore remains a reversible experiment rather than a
+deployment replacement. See the full protocol and interpretation limits in
+[`detector/experiments/2026-09-12-yolox-vs-yolov8n-validation.md`](detector/experiments/2026-09-12-yolox-vs-yolov8n-validation.md).
+
 ## Engineering decisions
 
 - Inference runs in a Web Worker, so model work does not block the review UI.
@@ -100,19 +116,19 @@ engagement can replace the model without rewriting the operator experience:
    train/validation/test split before training.
 2. Convert labelled images to the versioned manifest described in
    [`evaluation/README.md`](evaluation/README.md).
-3. Train with [`detector/train_yolox_cpu.py`](detector/train_yolox_cpu.py), then
-   select operating thresholds on validation only.
+3. Implement or select a backend through [`lib/detectors/types.ts`](lib/detectors/types.ts),
+   then train on `train` and select operating thresholds on `validation` only.
 4. Export the approved checkpoint to ONNX and verify preprocessing, output
    decoding, NMS, labels, and a known validation sample.
-5. Replace `public/models/yolox_nano.onnx` and update the model metadata and class
-   list in [`lib/detection.ts`](lib/detection.ts).
+5. Add the approved ONNX artifact and its checksum to a detector adapter; keep
+   experimental or license-unresolved adapters isolated from the deployed registry.
 6. Run the browser tests and compare exported coordinates and scores against the
    reference Python inference before deployment.
 
-The current browser contract is a 416 × 416 top-left letterboxed image, BGR CHW
-float32 values in the 0–255 range, and YOLOX box decoding. A different detector
-can be integrated by changing the worker-side pre/post-processing while keeping
-the review, batch, and reporting components intact.
+The current YOLOX adapter uses a 416 × 416 top-left letterbox, BGR CHW float32
+values in the 0–255 range, and YOLOX decoding. Detector adapters own their input
+contract and decoding, while the review, batch, and reporting components remain
+unchanged.
 
 ## Local development
 
@@ -141,7 +157,7 @@ and local reports stay under ignored `reports/local/` paths.
 ```text
 app/          Inspection and batch-review interface
 lib/          Browser inference, reporting, evaluation, and routing logic
-detector/     Reproducible YOLOX training and validation pipeline
+detector/     Reproducible detector training and validation pipelines
 evaluation/   Dataset manifest and split-integrity documentation
 tests/        Detection, export, evaluation, VLM, and routing tests
 vlm/          Preserved VLM baselines and local adapter documentation
@@ -156,5 +172,8 @@ vlm/          Preserved VLM baselines and local adapter documentation
 - DsPCBSD+ is distributed under CC BY 4.0. Raw images are not committed here.
 - YOLOX is Apache-2.0; ONNX Runtime is MIT. Their notices are included in
   `public/models/`.
+- The isolated YOLOv8 experiment uses Ultralytics 8.3.39 under AGPL-3.0 or
+  Ultralytics Enterprise terms; its package, weights, and checkpoints are not
+  included in the hosted application or repository.
 - Application code is MIT licensed. Third-party model and dataset terms still
   apply.

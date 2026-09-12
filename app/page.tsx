@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { INPUT_SIZE, MODEL, createReport, reportCsv, rgbaToBgr, validateImageFile, visibleDetections } from "@/lib/detection";
+import { MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
 import type { Detection, ImageInfo, Review, Run } from "@/lib/detection";
+import { DEFAULT_DETECTOR } from "@/lib/detectors/registry";
 
 declare global {
   interface Document {
@@ -250,13 +251,21 @@ export default function Home() {
     const started = performance.now();
     onStatus("Preparing image…");
     const canvas = document.createElement("canvas");
-    canvas.width = INPUT_SIZE; canvas.height = INPUT_SIZE;
+    const detector = DEFAULT_DETECTOR;
+    const inputSize = detector.input.size;
+    canvas.width = inputSize; canvas.height = inputSize;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("Image processing is unavailable in this browser.");
-    const ratio = Math.min(INPUT_SIZE / element.naturalWidth, INPUT_SIZE / element.naturalHeight);
-    context.fillStyle = "rgb(114,114,114)"; context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
-    context.drawImage(element, 0, 0, Math.floor(element.naturalWidth * ratio), Math.floor(element.naturalHeight * ratio));
-    const data = rgbaToBgr(context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data);
+    const ratio = Math.min(inputSize / element.naturalWidth, inputSize / element.naturalHeight);
+    const drawWidth = Math.floor(element.naturalWidth * ratio);
+    const drawHeight = Math.floor(element.naturalHeight * ratio);
+    const drawX = detector.input.placement === "center" ? Math.floor((inputSize - drawWidth) / 2) : 0;
+    const drawY = detector.input.placement === "center" ? Math.floor((inputSize - drawHeight) / 2) : 0;
+    const padding = detector.input.paddingValue;
+    context.fillStyle = `rgb(${padding},${padding},${padding})`;
+    context.fillRect(0, 0, inputSize, inputSize);
+    context.drawImage(element, drawX, drawY, drawWidth, drawHeight);
+    const data = detector.preprocess(context.getImageData(0, 0, inputSize, inputSize).data);
     const worker = workerRef.current ?? new Worker("/runtime/inference.worker.js", { type: "module" });
     workerRef.current = worker;
     const result = await new Promise<{ detections: Detection[]; inferenceMs: number }>((resolve, reject) => {
@@ -279,7 +288,7 @@ export default function Home() {
           worker.terminate(); workerRef.current = null; reject(new Error(event.data.message));
         } else resolve(event.data);
       };
-      worker.postMessage({ data, width: element.naturalWidth, height: element.naturalHeight }, [data.buffer]);
+      worker.postMessage({ detectorId: detector.id, data, width: element.naturalWidth, height: element.naturalHeight }, [data.buffer]);
     });
     if (ticket !== revision.current) throw new Error("Detection cancelled.");
     return { ...result, totalMs: Math.round(performance.now() - started), completedAt: new Date().toISOString() } satisfies Run;
