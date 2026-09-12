@@ -47,3 +47,5 @@ next-env.d.ts
 /reports/local/
 /public/runtime/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]

@@ -56,6 +56,7 @@ export type VlmInspectionResult = {
   findings: VlmFinding[];
   latencyMs: number;
   rawOutput?: string;
+  providerMetadata?: Record<string, unknown>;
 };
 
 const MAX_FINDINGS = 100;
@@ -229,6 +230,7 @@ export function createHttpVlmAdapter(config: HttpVlmAdapterConfig) {
         try {
           const result = parseVlmResponse(payload, { ...request, promptVersion }, config.model, Date.now() - started);
           if (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).output === "string") result.rawOutput = (payload as Record<string, string>).output;
+          if (payload && typeof payload === "object" && (payload as Record<string, unknown>).metadata && typeof (payload as Record<string, unknown>).metadata === "object" && !Array.isArray((payload as Record<string, unknown>).metadata)) result.providerMetadata = (payload as Record<string, Record<string, unknown>>).metadata;
           return result;
         } catch (cause) {
           const rawOutput = payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).output === "string"

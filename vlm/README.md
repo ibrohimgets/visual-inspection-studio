@@ -1,9 +1,9 @@
 # Zero-shot VLM adapter
 
 The first VLM milestone is a provider-neutral HTTP contract in
-`lib/vlm.ts`. It does not call a hosted model and does not create demo
-predictions. A local inference gateway must implement the contract before the
-browser workflow can display VLM findings.
+`lib/vlm.ts`. Gateways implement that contract without exposing provider
+credentials to the browser. The repository includes a local open-model gateway
+and an optional hosted OpenAI gateway; neither creates demo predictions.
 
 ## Request contract
 
@@ -82,9 +82,48 @@ The first recorded result is in
 That probe failed the structured-output gate, so the frozen test split was
 intentionally not run.
 
+## Optional GPT-5.6 Terra gateway
+
+`openai_gateway.py` maps the same provider-neutral contract to the OpenAI
+Responses API using strict structured outputs. It binds to loopback by default
+and reads the API key only from `OPENAI_API_KEY`; never place a key in source
+code, `.env` files, browser JavaScript, requests to `/inspect`, or committed
+reports.
+
+Set a Windows user-level environment variable, restart the terminal or app that
+will launch the gateway, and then run:
+
+```powershell
+python vlm/openai_gateway.py `
+  --model gpt-5.6-terra `
+  --reasoning-effort low `
+  --port 8010
+```
+
+Run the same deterministic validation probe:
+
+```powershell
+node scripts/run-vlm-validation.mjs `
+  --endpoint http://127.0.0.1:8010/inspect `
+  --model gpt-5.6-terra `
+  --limit 6 `
+  --output reports/local/gpt-5.6-terra-zero-shot-validation-subset.json
+```
+
+Images sent through this gateway leave the local machine and are processed by
+the hosted API. The gateway sets `store: false`, records request provenance and
+token usage (never the API key), and keeps local reports under the Git-ignored
+`reports/local/` directory. Review your organization's OpenAI data controls and
+cost requirements before using proprietary inspection images.
+
+The first Terra probe is recorded in
+[`experiments/2026-09-12-gpt-5.6-terra-validation.md`](experiments/2026-09-12-gpt-5.6-terra-validation.md).
+It passed the response-structure gate but did not pass the localization and
+class gate, so the frozen test split was intentionally not run.
+
 ## Privacy boundary
 
-The adapter accepts an explicit endpoint and the included gateway binds to
-loopback, so images stay on the operator's machine by default. A hosted
-provider can be added later behind the same interface with separate
-cost/privacy documentation.
+The adapter accepts an explicit endpoint and both included gateways bind to
+loopback. Images stay on the operator's machine only when using the local
+open-model gateway. The optional OpenAI gateway sends images to a hosted API;
+that boundary is explicit and should be presented to operators before use.

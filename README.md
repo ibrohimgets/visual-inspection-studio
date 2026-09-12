@@ -117,9 +117,15 @@ The first local provider is the loopback-only
 gateway documented in [`vlm/README.md`](vlm/README.md). It is a general
 multimodal model rather than a PCB-defect model, so malformed responses and
 weak localization are expected failure cases. The validation runner records
-those failures instead of repairing them into predictions. The browser YOLOX
-workflow remains unchanged, and the frozen test split will not be run until a
-small validation probe produces usable structured outputs.
+those failures instead of repairing them into predictions.
+
+An optional loopback gateway for GPT-5.6 Terra uses the same adapter and keeps
+the API key out of browser code and committed files. Its first six-image
+validation probe produced valid structured responses, but did not meet the
+IoU/class gate. The measured results and limitations are recorded in
+[`vlm/experiments/2026-09-12-gpt-5.6-terra-validation.md`](vlm/experiments/2026-09-12-gpt-5.6-terra-validation.md).
+The browser YOLOX workflow remains unchanged, and the frozen test split has not
+been run.
 
 ## Local development
 

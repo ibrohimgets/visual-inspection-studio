@@ -61,7 +61,7 @@ test("HTTP adapter sends the protocol and parses the provider response", async (
     model: "local-test-vlm",
     fetchImpl: async (_url, options) => {
       sent = JSON.parse(options.body);
-      return { ok: true, status: 200, json: async () => validResponse };
+      return { ok: true, status: 200, json: async () => ({ output: JSON.stringify(validResponse), metadata: { provider: "test" } }) };
     },
   });
   const result = await adapter.inspect(request);
@@ -69,6 +69,7 @@ test("HTTP adapter sends the protocol and parses the provider response", async (
   assert.equal(sent.model, "local-test-vlm");
   assert.equal(sent.request.mode, "zero-shot");
   assert.equal(result.model, "local-test-vlm");
+  assert.equal(result.providerMetadata.provider, "test");
 });
 
 test("HTTP adapter preserves malformed local-model output for failure analysis", async () => {
