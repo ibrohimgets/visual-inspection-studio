@@ -1,0 +1,6 @@
+*.jpeg binary
+*.jpg binary
+*.onnx binary
+*.pdf binary
+*.png binary
+*.webp binary
