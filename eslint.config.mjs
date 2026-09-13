@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     ".vinext/**",
     ".wrangler/**",
     "dist/**",
+    "lib/generated/**",
     "public/runtime/**",
     "out/**",
     "build/**",

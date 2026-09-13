@@ -53,6 +53,26 @@
     "ruleSeverity": {
       "enum": ["info", "minor", "major", "critical"]
     },
+    "ruleSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "documentId", "page", "evidence"],
+      "properties": {
+        "kind": { "enum": ["manual", "document", "system"] },
+        "documentId": { "$ref": "#/$defs/text" },
+        "page": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
     "classes": {
       "type": "array",
       "minItems": 1,
@@ -66,12 +86,13 @@
     },
     "ruleBase": {
       "type": "object",
-      "required": ["id", "type", "description", "severity"],
+      "required": ["id", "type", "description", "severity", "source"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "type": { "type": "string" },
         "description": { "$ref": "#/$defs/text" },
-        "severity": { "$ref": "#/$defs/ruleSeverity" }
+        "severity": { "$ref": "#/$defs/ruleSeverity" },
+        "source": { "$ref": "#/$defs/ruleSource" }
       }
     },
     "defectClassRule": {
@@ -80,12 +101,13 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "type", "description", "severity", "classes", "outcome"],
+          "required": ["id", "type", "description", "severity", "source", "classes", "outcome"],
           "properties": {
             "id": { "$ref": "#/$defs/id" },
             "type": { "const": "defect-class" },
             "description": { "$ref": "#/$defs/text" },
             "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "classes": { "$ref": "#/$defs/classes" },
             "outcome": { "$ref": "#/$defs/outcome" }
           }
@@ -98,12 +120,13 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "type", "description", "severity", "maximumAllowed", "outcome"],
+          "required": ["id", "type", "description", "severity", "source", "maximumAllowed", "outcome"],
           "properties": {
             "id": { "$ref": "#/$defs/id" },
             "type": { "const": "maximum-defect-count" },
             "description": { "$ref": "#/$defs/text" },
             "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "classes": { "$ref": "#/$defs/classes" },
             "maximumAllowed": { "type": "integer", "minimum": 0 },
             "outcome": { "$ref": "#/$defs/outcome" }
@@ -117,12 +140,13 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "type", "description", "severity", "ignoreBelow", "reviewBelow"],
+          "required": ["id", "type", "description", "severity", "source", "ignoreBelow", "reviewBelow"],
           "properties": {
             "id": { "$ref": "#/$defs/id" },
             "type": { "const": "confidence-review" },
             "description": { "$ref": "#/$defs/text" },
             "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "classes": { "$ref": "#/$defs/classes" },
             "ignoreBelow": { "type": "number", "minimum": 0, "maximum": 1 },
             "reviewBelow": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
@@ -136,12 +160,13 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "type", "description", "severity", "sourceType", "statement", "reason"],
+          "required": ["id", "type", "description", "severity", "source", "sourceType", "statement", "reason"],
           "properties": {
             "id": { "$ref": "#/$defs/id" },
             "type": { "const": "unsupported" },
             "description": { "$ref": "#/$defs/text" },
             "severity": { "$ref": "#/$defs/ruleSeverity" },
+            "source": { "$ref": "#/$defs/ruleSource" },
             "sourceType": { "$ref": "#/$defs/text" },
             "statement": { "$ref": "#/$defs/text" },
             "reason": { "$ref": "#/$defs/text" }

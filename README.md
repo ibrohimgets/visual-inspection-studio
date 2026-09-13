@@ -1,23 +1,29 @@
 # Visual Inspection Studio
 
-Visual Inspection Studio is a production-style computer-vision review console:
-upload images, run a real detector, inspect localized findings, record a human
-decision, and download structured inspection reports.
+Visual Inspection Studio is a governed computer-vision inspection console. It
+turns a searchable quality-spec PDF into evidence-linked rule candidates, keeps
+those candidates behind a human approval gate, then applies the approved policy
+to real detector findings with a deterministic `PASS`, `FAIL`, or `REVIEW`
+trace.
 
 **[Open the hosted demo](https://visual-inspection-studio.iibrohimm.chatgpt.site/)**
 
 The demo performs YOLOX-Nano inference locally in the browser. Images are not
-sent to an inference API. The same review surface is designed to accept a
-client-specific defect detector without rebuilding the operator workflow.
+sent to an inference API. PDF text is extracted locally and sent to the
+configured OpenAI model only when the user requests rule extraction. The LLM
+never makes the final image decision and generated rules never activate
+automatically.
 
 ## Try the complete workflow in under 30 seconds
 
 1. Select **Load sample**, then **Run detection**.
-2. Select a box to inspect the magnified region and pixel coordinates.
-3. Accept or reject the finding and add a reviewer note.
-4. Change the confidence threshold to see the operating-point tradeoff.
-5. Download the JSON or CSV inspection report.
-6. Open **Batch** to process several local images in one queue.
+2. Select a box, inspect the crop, accept or reject the finding, and add a note.
+3. Open **Rules & decision** to see the exact policy trace behind the result.
+4. Open **Quality spec** and choose **Run example PDF**.
+5. Verify every candidate rule against its page and source evidence.
+6. Select **Approve & activate policy**; until then, the current policy stays in
+   force. Use **Restore default** to reverse the change.
+7. Download the JSON/CSV report or open **Batch** for a multi-image queue.
 
 ## What the product demonstrates
 
@@ -26,7 +32,9 @@ client-specific defect detector without rebuilding the operator workflow.
 | Real inference | Official YOLOX-Nano ONNX model, ONNX Runtime Web, no mocked boxes |
 | Clear localization | Selectable boxes, labels, confidence, pixel coordinates, and region zoom |
 | Human review | Accept, reject, reset, notes, and unsaved-change protection |
-| Deterministic decisions | Versioned hand-written rules produce PASS, FAIL, or REVIEW with an ordered decision trace |
+| Runtime contract | `rule-schema.v1.json` is compiled by AJV and enforced before a policy reaches the engine |
+| Governed LLM intake | Searchable PDF text → strict JSON → schema validation → source-evidence verification → human approval |
+| Deterministic decisions | Approved rules produce PASS, FAIL, or REVIEW with fixed precedence and an ordered decision trace |
 | Batch inspection | Up to 12 local images per browser queue with per-image status and latency |
 | Inspection reports | Safe JSON and CSV export with model provenance, timings, coordinates, review state, rule outcome, and trace |
 | Operational visibility | Model version, execution provider, inference time, total time, and review counts |
@@ -34,14 +42,20 @@ client-specific defect detector without rebuilding the operator workflow.
 
 ```mermaid
 flowchart LR
-  A[Image or batch] --> B[YOLOX inference worker]
-  B --> C[Boxes and confidence]
-  C --> D[Deterministic rule engine]
-  C --> E[Region zoom]
-  E --> F[Human accept / reject / note]
-  F --> D
-  D --> G[PASS / FAIL / REVIEW + trace]
-  G --> H[JSON or CSV report]
+  P[Searchable quality PDF] --> X[Local PDF.js text extraction]
+  X --> L[LLM strict rule candidate]
+  L --> V[AJV + page evidence validation]
+  V --> A{Human approves?}
+  A -- No --> Q[Candidate only]
+  A -- Yes --> R[Active deterministic policy]
+  I[Image or batch] --> D[Detector adapter]
+  D --> F[Boxes + confidence]
+  F --> U[Review / correction]
+  F --> E[Rule engine]
+  U --> E
+  R --> E
+  E --> O[PASS / FAIL / REVIEW + trace]
+  O --> Z[JSON / CSV report]
 ```
 
 ## What works today
@@ -63,26 +77,67 @@ its ONNX export and decoder are verified end to end.
 This distinction is deliberate: the interface never relabels generic COCO
 predictions as industrial defects and never displays fabricated results.
 
+### Quality-spec PDF → approved rules
+
+The first governed extraction path is working end to end:
+
+1. PDF.js extracts selectable text per page in the browser and creates a
+   SHA-256 document fingerprint.
+2. The server sends only page-labelled text and the active detector vocabulary
+   to the configured model (Terra by default).
+3. The Responses API must return the strict
+   [`spec-extraction-output-schema.v1.json`](inspection/spec-extraction-output-schema.v1.json)
+   shape.
+4. The adapter converts that output to the canonical
+   [`rule-schema.v1.json`](inspection/rule-schema.v1.json) contract.
+5. AJV validates the policy and the application verifies that every evidence
+   excerpt occurs on the declared source page.
+6. A human reviews and explicitly approves the candidate. Approval is the only
+   path that can replace the active policy.
+7. The existing deterministic engine—not the LLM—uses the approved rules for
+   image decisions.
+
+The MVP deliberately supports searchable PDFs only. Scanned, encrypted,
+image-only, oversized, or semantically unsupported requirements fail closed.
+For example, a “scratch longer than 2 mm” rule becomes `REVIEW` because the
+current detector has neither a scratch class nor calibrated physical-scale
+measurement. It is never silently ignored or converted into a fabricated
+decision.
+
 ### Deterministic inspection rules
 
-The current workflow applies a hand-written, versioned rule schema after
-detection. It supports class-specific outcomes and severity, maximum defect
-counts, confidence-based review bands, reviewer corrections, and unsupported
-requirements. Conflicts always resolve as `FAIL > REVIEW > PASS`, and every
-report contains the ordered reasoning trace.
+The rule engine supports class-specific outcomes and severity, maximum defect
+counts, confidence review bands, reviewer corrections, and unsupported
+requirements. Conflicts always resolve as `FAIL > REVIEW > PASS`, and reports
+contain the ordered reasoning trace. The shipped COCO policy and PCB policy are
+explicit examples—not factory acceptance specifications.
 
-The hosted COCO mode uses a clearly labelled object-presence demonstration
-policy. A separate PCB example shows the contract intended for a future
-client-specific detector. Neither policy is presented as a real factory's
-acceptance specification. See [`inspection/README.md`](inspection/README.md),
-the [JSON schema](inspection/rule-schema.v1.json), and the executable examples:
+See [`inspection/README.md`](inspection/README.md) or run:
 
 ```bash
 npm run rules:examples
 ```
 
-PDF/LLM rule extraction is deliberately deferred. A future extractor must emit
-and validate this same schema before its rules can reach the engine.
+### Reproducible example pipeline
+
+The repository includes the same two-page searchable PDF used by the UI:
+[`factory-quality-spec-example.pdf`](output/pdf/factory-quality-spec-example.pdf).
+It contains supported camera-visible rules plus two requirements that the
+current detector cannot verify.
+
+One observed local run on 2026-09-13 produced seven evidence-linked rules from
+2 pages / 2,984 extracted characters in 10.034 seconds using 2,801 total tokens.
+After explicit harness approval, a synthetic 92% `person` finding produced
+`FAIL / critical` with `personnel-exclusion` as the decisive rule. The scratch
+measurement and missing-component requirements remained `REVIEW`. This is an
+integration example, not an accuracy or latency benchmark; model output and
+network timing can vary.
+
+With `OPENAI_API_KEY` set, reproduce the pipeline with:
+
+```bash
+npm run spec:example
+```
 
 ## Measured detector evidence
 
@@ -126,6 +181,16 @@ deployment replacement. See the full protocol and interpretation limits in
 
 - Inference runs in a Web Worker, so model work does not block the review UI.
 - Browser input has file-type, file-size, pixel-count, timeout, and malformed-output guardrails.
+- PDF intake is limited to 10 MB, 25 pages, 15,000 characters per page, and
+  80,000 characters total; image-only PDFs are rejected.
+- Both JSON schemas are compiled to standalone AJV validators during development
+  and checked before production builds. No runtime code generation is required
+  in the Cloudflare worker.
+- The LLM receives document text as untrusted data, returns a candidate only,
+  and is separated from the deterministic decision engine by validation and a
+  human approval gate.
+- Every document-derived rule retains the PDF fingerprint, source page, and an
+  exact evidence excerpt. Evidence mismatches block approval.
 - Coordinates remain in original-image pixel space from detection through export.
 - CSV values are protected against spreadsheet-formula injection.
 - Review changes trigger leave/replace protection until a complete report is exported.
@@ -159,10 +224,24 @@ unchanged.
 
 ```bash
 npm ci
+npm run schema:check
 npm run dev
 ```
 
 Open `http://localhost:5173`.
+
+To enable PDF rule extraction, provide the secret to the server process. Never
+place a real key in source code, tracked JSON, or a committed `.env` file.
+
+```powershell
+$env:OPENAI_API_KEY = "your-key"
+# Optional; defaults to gpt-5.6-terra
+$env:OPENAI_RULE_EXTRACTION_MODEL = "gpt-5.6-terra"
+npm run dev
+```
+
+Production deployments must configure `OPENAI_API_KEY` as a hosting secret. The
+browser never receives it. The extraction request uses `store: false`.
 
 Quality checks:
 
@@ -170,6 +249,7 @@ Quality checks:
 npm run typecheck
 npm test
 npm run lint
+npm run schema:check
 npm run build
 ```
 
@@ -181,10 +261,12 @@ and local reports stay under ignored `reports/local/` paths.
 
 ```text
 app/          Inspection and batch-review interface
-inspection/   Versioned rule schema and hand-written example policies
-lib/          Browser inference, reporting, evaluation, and routing logic
+inspection/   Runtime and strict-extraction schemas plus example policies
+lib/          Inference, PDF parsing, rule extraction, validation, and reporting
 detector/     Reproducible detector training and validation pipelines
 evaluation/   Dataset manifest and split-integrity documentation
+output/pdf/   Searchable quality-spec example used by the end-to-end demo
+scripts/      Validator generation, example pipeline, and experiment tooling
 tests/        Detection, export, evaluation, VLM, and routing tests
 vlm/          Preserved VLM baselines and local adapter documentation
 ```
@@ -193,6 +275,14 @@ vlm/          Preserved VLM baselines and local adapter documentation
 
 - The hosted demo processes images in the browser. Do not use it as the sole
   basis for safety-critical decisions.
+- PDF text leaves the browser only after the user requests extraction and is
+  sent to the configured OpenAI model through the server. Do not upload
+  confidential production specifications without an approved data policy.
+- The first PDF version does not perform OCR, table reconstruction, unit
+  conversion, geometric calibration, or detector retraining. Unclear and
+  unsupported requirements route to `REVIEW`.
+- A public production deployment needs authentication, rate limiting, audit
+  retention policy, and tenant isolation before accepting real client documents.
 - First-run timing can include model loading. The UI reports measured time for
   the current device rather than promising a fixed speed.
 - DsPCBSD+ is distributed under CC BY 4.0. Raw images are not committed here.

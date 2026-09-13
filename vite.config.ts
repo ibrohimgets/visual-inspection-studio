@@ -33,7 +33,7 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
   process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= "false";
   process.env.WRANGLER_SEND_METRICS ??= "false";
@@ -58,7 +58,19 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
-        config: localBindingConfig,
+        config: {
+          ...localBindingConfig,
+          // Forward shell credentials only to the ephemeral local Worker. The
+          // production build never serializes them; Sites supplies its own env.
+          ...(command === "serve" && process.env.OPENAI_API_KEY ? {
+            vars: {
+              OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+              ...(process.env.OPENAI_RULE_EXTRACTION_MODEL
+                ? { OPENAI_RULE_EXTRACTION_MODEL: process.env.OPENAI_RULE_EXTRACTION_MODEL }
+                : {}),
+            },
+          } : {}),
+        },
       }),
     ],
   };

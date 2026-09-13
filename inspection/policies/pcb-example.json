@@ -12,6 +12,7 @@
       "type": "confidence-review",
       "description": "unconfirmed PCB findings between 30% and 70% confidence",
       "severity": "major",
+      "source": { "kind": "manual", "documentId": "manual:pcb-example-policy", "page": null, "evidence": "Unconfirmed PCB findings between 30% and 70% confidence require review." },
       "ignoreBelow": 0.3,
       "reviewBelow": 0.7
     },
@@ -20,6 +21,7 @@
       "type": "defect-class",
       "description": "the example critical-circuit class rule",
       "severity": "critical",
+      "source": { "kind": "manual", "documentId": "manual:pcb-example-policy", "page": null, "evidence": "SH and OP are critical circuit defect classes." },
       "classes": ["SH", "OP"],
       "outcome": "FAIL"
     },
@@ -28,6 +30,7 @@
       "type": "defect-class",
       "description": "the conductor-scratch review rule",
       "severity": "major",
+      "source": { "kind": "manual", "documentId": "manual:pcb-example-policy", "page": null, "evidence": "Conductor scratches require manual review." },
       "classes": ["CS"],
       "outcome": "REVIEW"
     },
@@ -36,6 +39,7 @@
       "type": "defect-class",
       "description": "the example acceptable cosmetic class rule",
       "severity": "minor",
+      "source": { "kind": "manual", "documentId": "manual:pcb-example-policy", "page": null, "evidence": "SP is an acceptable cosmetic class in this example." },
       "classes": ["SP"],
       "outcome": "PASS"
     },
@@ -44,6 +48,7 @@
       "type": "maximum-defect-count",
       "description": "no more than two actionable PCB defects are permitted",
       "severity": "major",
+      "source": { "kind": "manual", "documentId": "manual:pcb-example-policy", "page": null, "evidence": "No more than two actionable PCB defects are permitted." },
       "maximumAllowed": 2,
       "outcome": "FAIL"
     }

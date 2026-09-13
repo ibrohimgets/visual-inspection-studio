@@ -1,4 +1,5 @@
 import type { Detection } from "./detectors/types.ts";
+import { validate as generatedRuleSchemaValidator } from "./generated/rule-schema-validator.mjs";
 
 export const INSPECTION_RULE_SCHEMA_VERSION = 1 as const;
 export const OUTCOME_PRECEDENCE = ["FAIL", "REVIEW", "PASS"] as const;
@@ -7,10 +8,18 @@ export type InspectionOutcome = "PASS" | "FAIL" | "REVIEW";
 export type InspectionSeverity = "none" | "info" | "minor" | "major" | "critical";
 export type RuleSeverity = Exclude<InspectionSeverity, "none">;
 
+export type RuleSource = {
+  kind: "manual" | "document" | "system";
+  documentId: string;
+  page: number | null;
+  evidence: string;
+};
+
 type RuleBase = {
   id: string;
   description: string;
   severity: RuleSeverity;
+  source: RuleSource;
 };
 
 export type DefectClassRule = RuleBase & {
@@ -90,6 +99,35 @@ export type NormalizedRuleSet = {
   issues: string[];
 };
 
+export type RuleSchemaValidationIssue = {
+  path: string;
+  keyword: string;
+  message: string;
+};
+
+export type RuleSchemaValidation = {
+  valid: boolean;
+  issues: RuleSchemaValidationIssue[];
+};
+
+type StandaloneSchemaValidator = ((input: unknown) => boolean) & {
+  errors?: Array<{ instancePath: string; keyword: string; message?: string }> | null;
+};
+
+const ruleSchemaValidator = generatedRuleSchemaValidator as StandaloneSchemaValidator;
+
+export function validateInspectionRuleSet(input: unknown): RuleSchemaValidation {
+  const valid = ruleSchemaValidator(input);
+  return {
+    valid: Boolean(valid),
+    issues: valid ? [] : (ruleSchemaValidator.errors ?? []).map(error => ({
+      path: error.instancePath || "/",
+      keyword: error.keyword,
+      message: error.message ?? "does not satisfy the rule schema",
+    })),
+  };
+}
+
 const outcomeRank: Record<InspectionOutcome, number> = { PASS: 0, REVIEW: 1, FAIL: 2 };
 const severityRank: Record<InspectionSeverity, number> = { none: 0, info: 1, minor: 2, major: 3, critical: 4 };
 const ruleTypeRank: Record<InspectionRule["type"], number> = {
@@ -140,6 +178,18 @@ function validConfidence(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+function validRuleSource(value: unknown): value is RuleSource {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["kind", "documentId", "page", "evidence"])) return false;
+  return (value.kind === "manual" || value.kind === "document" || value.kind === "system")
+    && validText(value.documentId)
+    && (value.page === null || (Number.isInteger(value.page) && (value.page as number) >= 1))
+    && validText(value.evidence, 1000);
+}
+
+function copyRuleSource(value: RuleSource): RuleSource {
+  return { kind: value.kind, documentId: value.documentId.trim(), page: value.page, evidence: value.evidence.trim() };
+}
+
 function unsupportedFrom(raw: unknown, index: number, reason: string, idOverride?: string): UnsupportedInspectionRule {
   const source = isRecord(raw) ? raw : {};
   const sourceType = validText(source.type, 100) ? source.type : "unknown";
@@ -154,6 +204,12 @@ function unsupportedFrom(raw: unknown, index: number, reason: string, idOverride
     reason,
     description: validText(source.description, 500) ? source.description.trim() : "This requirement cannot be evaluated deterministically.",
     severity: isRuleSeverity(source.severity) ? source.severity : "major",
+    source: validRuleSource(source.source) ? copyRuleSource(source.source) : {
+      kind: "system",
+      documentId: "runtime-validation",
+      page: null,
+      evidence: reason,
+    },
   };
 }
 
@@ -162,52 +218,56 @@ function normalizeRule(raw: unknown, index: number): { rule: InspectionRule; iss
     const issue = `Rule ${index + 1} must be an object.`;
     return { rule: unsupportedFrom(raw, index, issue), issue };
   }
-  if (!validId(raw.id) || !validText(raw.description) || !isRuleSeverity(raw.severity)) {
-    const issue = `Rule ${index + 1} has invalid id, description, or severity metadata.`;
+  if (!validId(raw.id) || !validText(raw.description) || !isRuleSeverity(raw.severity) || !validRuleSource(raw.source)) {
+    const issue = `Rule ${index + 1} has invalid id, description, severity, or source metadata.`;
     return { rule: unsupportedFrom(raw, index, issue), issue };
   }
 
   if (raw.type === "defect-class") {
-    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "classes", "outcome"])
+    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "source", "classes", "outcome"])
       || !validClasses(raw.classes) || !isOutcome(raw.outcome)) {
       const issue = `Rule ${raw.id} has invalid classes or outcome.`;
       return { rule: unsupportedFrom(raw, index, issue), issue };
     }
     return { rule: { id: raw.id, type: raw.type, description: raw.description.trim(), severity: raw.severity,
+      source: copyRuleSource(raw.source),
       classes: [...raw.classes], outcome: raw.outcome } };
   }
 
   if (raw.type === "maximum-defect-count") {
-    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "classes", "maximumAllowed", "outcome"])
+    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "source", "classes", "maximumAllowed", "outcome"])
       || !optionalClasses(raw.classes) || !Number.isInteger(raw.maximumAllowed) || (raw.maximumAllowed as number) < 0
       || !isOutcome(raw.outcome)) {
       const issue = `Rule ${raw.id} has an invalid class filter, maximumAllowed, or outcome.`;
       return { rule: unsupportedFrom(raw, index, issue), issue };
     }
     return { rule: { id: raw.id, type: raw.type, description: raw.description.trim(), severity: raw.severity,
+      source: copyRuleSource(raw.source),
       ...(raw.classes ? { classes: [...raw.classes] } : {}), maximumAllowed: raw.maximumAllowed as number,
       outcome: raw.outcome } };
   }
 
   if (raw.type === "confidence-review") {
-    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "classes", "ignoreBelow", "reviewBelow"])
+    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "source", "classes", "ignoreBelow", "reviewBelow"])
       || !optionalClasses(raw.classes) || !validConfidence(raw.ignoreBelow) || !validConfidence(raw.reviewBelow)
       || raw.ignoreBelow >= raw.reviewBelow) {
       const issue = `Rule ${raw.id} needs 0 <= ignoreBelow < reviewBelow <= 1 and a valid optional class filter.`;
       return { rule: unsupportedFrom(raw, index, issue), issue };
     }
     return { rule: { id: raw.id, type: raw.type, description: raw.description.trim(), severity: raw.severity,
+      source: copyRuleSource(raw.source),
       ...(raw.classes ? { classes: [...raw.classes] } : {}), ignoreBelow: raw.ignoreBelow,
       reviewBelow: raw.reviewBelow } };
   }
 
   if (raw.type === "unsupported") {
-    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "sourceType", "statement", "reason"])
+    if (!hasOnlyKeys(raw, ["id", "type", "description", "severity", "source", "sourceType", "statement", "reason"])
       || !validText(raw.sourceType, 100) || !validText(raw.statement) || !validText(raw.reason)) {
       const issue = `Unsupported rule ${raw.id} needs sourceType, statement, and reason.`;
       return { rule: unsupportedFrom(raw, index, issue), issue };
     }
     return { rule: { id: raw.id, type: raw.type, description: raw.description.trim(), severity: raw.severity,
+      source: copyRuleSource(raw.source),
       sourceType: raw.sourceType.trim(), statement: raw.statement.trim(), reason: raw.reason.trim() } };
   }
 
@@ -232,6 +292,7 @@ function invalidRuleSet(reason: string): NormalizedRuleSet {
 }
 
 export function normalizeInspectionRuleSet(input: unknown): NormalizedRuleSet {
+  const contract = validateInspectionRuleSet(input);
   if (!isRecord(input)) return invalidRuleSet("Inspection rule set must be an object.");
   if (input.schemaVersion !== INSPECTION_RULE_SCHEMA_VERSION) {
     return invalidRuleSet(`Unsupported inspection rule schema version ${String(input.schemaVersion)}.`);
@@ -245,6 +306,9 @@ export function normalizeInspectionRuleSet(input: unknown): NormalizedRuleSet {
 
   const normalized = input.rules.map(normalizeRule);
   const issues = normalized.flatMap(item => item.issue ? [item.issue] : []);
+  if (!contract.valid && issues.length === 0) {
+    issues.push(`Runtime schema rejected the supplied policy with ${contract.issues.length} validation issue(s).`);
+  }
   const idCounts = new Map<string, number>();
   normalized.forEach(({ rule }) => idCounts.set(rule.id, (idCounts.get(rule.id) ?? 0) + 1));
   const rules = normalized.map(({ rule }, index) => {
@@ -254,9 +318,7 @@ export function normalizeInspectionRuleSet(input: unknown): NormalizedRuleSet {
     return unsupportedFrom(rule, index, issue, `duplicate-${String(index + 1).padStart(2, "0")}`);
   });
 
-  return {
-    issues,
-    ruleSet: {
+  const ruleSet: InspectionRuleSet = {
       schemaVersion: INSPECTION_RULE_SCHEMA_VERSION,
       id: input.id,
       name: input.name.trim(),
@@ -265,8 +327,13 @@ export function normalizeInspectionRuleSet(input: unknown): NormalizedRuleSet {
       defaultOutcome: input.defaultOutcome,
       defaultSeverity: input.defaultSeverity,
       rules,
-    },
   };
+  const normalizedContract = validateInspectionRuleSet(ruleSet);
+  if (!normalizedContract.valid) {
+    const summary = normalizedContract.issues.map(issue => `${issue.path} ${issue.message}`).join("; ");
+    return invalidRuleSet(`Normalized inspection rule set failed the runtime schema: ${summary}`);
+  }
+  return { issues, ruleSet };
 }
 
 function appliesToClass(classes: string[] | undefined, detection: Detection) {

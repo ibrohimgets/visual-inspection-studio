@@ -191,11 +191,58 @@ input[type="range"] { display: block; width: 100%; height: 16px; accent-color: #
 .batch-empty { min-height: 330px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 35px; text-align: center; }
 .batch-empty strong { font-size: 18px; font-weight: 550; }
 .batch-empty p { max-width: 540px; margin: 8px 0 18px; color: #6e7983; font-size: 14px; }
+.spec-workspace { min-height: 620px; }
+.spec-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; padding: 28px 30px; border-bottom: 1px solid #e0e4e8; }
+.spec-heading h2 { margin-bottom: 7px; font-size: 24px; font-weight: 550; }
+.spec-heading p:last-child { max-width: 790px; color: #65717d; font-size: 15px; line-height: 1.6; }
+.spec-actions { display: flex; flex-shrink: 0; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.spec-flow { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #e0e4e8; background: #f8f9fa; }
+.spec-flow > div { position: relative; display: grid; grid-template-columns: 32px 1fr; column-gap: 10px; min-height: 78px; padding: 15px 18px; border-right: 1px solid #e0e4e8; color: #7a858f; }
+.spec-flow > div:last-child { border-right: 0; }
+.spec-flow > div::after { content: ""; position: absolute; inset: auto 0 0; height: 2px; background: transparent; }
+.spec-flow > div.active::after { background: #386b9c; }
+.spec-flow > div.complete::after { background: #3e7d5c; }
+.spec-flow span { grid-row: 1 / 3; align-self: start; color: #8a949e; font-family: var(--font-mono); font-size: 12px; }
+.spec-flow strong { color: #3b4752; font-size: 13px; font-weight: 600; }
+.spec-flow small { margin-top: 3px; font-size: 12px; }
+.spec-alert { margin: 20px 30px 0; padding: 12px 15px; border: 1px solid #bfd1e2; background: #f2f7fb; color: #3e5e78; }
+.spec-alert.error { border-color: #e1bbb6; background: #fff3f1; color: #873e37; }
+.spec-alert strong { font-size: 13px; font-weight: 600; }
+.spec-alert p { margin-top: 3px; font-size: 13px; line-height: 1.5; }
+.spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 22px 30px; }
+.spec-document-panel, .spec-candidate-panel, .candidate-review-panel { border: 1px solid #dfe4e8; background: #fff; }
+.spec-document-panel, .spec-candidate-panel { min-height: 230px; padding: 20px; }
+.spec-properties { margin: 18px 0 0; padding-top: 9px; border-top: 1px solid #e5e9ed; }
+.spec-properties dd { max-width: 58%; font-family: var(--font-mono); font-size: 12px; }
+.spec-privacy { margin-top: 16px; color: #68747f; font-size: 12px; line-height: 1.6; }
+.spec-empty { min-height: 145px; display: flex; flex-direction: column; justify-content: center; color: #707b85; }
+.spec-empty strong { color: #3c4752; font-size: 15px; font-weight: 550; }
+.spec-empty p { max-width: 520px; margin-top: 6px; font-size: 13px; line-height: 1.6; }
+.validation-row { display: flex; gap: 7px; flex-wrap: wrap; margin: 18px 0 2px; }
+.validation-badge { padding: 4px 7px; border: 1px solid #d8dde2; border-radius: 3px; color: #65717b; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; }
+.validation-badge.valid { border-color: #b9d5c7; background: #edf7f1; color: #2f6b4c; }
+.validation-badge.pending { border-color: #e2c58d; background: #fff7e8; color: #805612; }
+.validation-badge.active { border-color: #a8c3dc; background: #edf5fb; color: #285b82; }
+.candidate-review-panel { margin: 0 30px 30px; padding: 20px; }
+.candidate-rules { margin: 18px 0 0; padding: 0; list-style: none; border-top: 1px solid #e3e7eb; }
+.candidate-rules > li { padding: 16px 0; border-bottom: 1px solid #e8ebee; }
+.candidate-rule-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.candidate-rule-heading > div { min-width: 0; }
+.candidate-rule-heading .mono { display: block; margin-bottom: 4px; color: #7a858f; }
+.candidate-rule-heading strong { display: block; color: #34404b; font-size: 14px; font-weight: 600; }
+.candidate-rule-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 7px; color: #75808a; font-family: var(--font-mono); font-size: 11px; }
+.candidate-rules blockquote { margin: 11px 0 0; padding: 10px 13px; border-left: 3px solid #9fb4c7; background: #f7f9fb; color: #53616e; font-size: 13px; line-height: 1.55; }
+.unsupported-reason { margin-top: 8px; color: #835a1c; font-size: 12px; line-height: 1.55; }
+.unsupported-reason strong { font-weight: 600; }
+.candidate-actions { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 18px; }
+.candidate-actions > p { max-width: 700px; color: #68747e; font-size: 13px; line-height: 1.6; }
+.candidate-actions > div { display: flex; flex-shrink: 0; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .decision-workspace { min-height: 560px; padding: 30px; }
 .decision-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid #e3e7eb; }
 .decision-heading h2 { margin-bottom: 7px; font-size: 24px; font-weight: 550; }
 .decision-heading p:last-child { max-width: 760px; color: #69747f; font-size: 15px; }
 .policy-version { flex-shrink: 0; padding: 6px 9px; border: 1px solid #dce1e6; background: #f8f9fa; color: #68737e; font-family: var(--font-mono); font-size: 12px; }
+.policy-panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .decision-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 22px; padding-top: 22px; }
 .policy-panel, .live-decision-panel, .trace-panel { border: 1px solid #dfe4e8; background: #fff; }
 .policy-panel, .live-decision-panel { padding: 20px; }
@@ -267,6 +314,9 @@ input[type="range"] { display: block; width: 100%; height: 16px; accent-color: #
   .workspace-tabs, .message { margin-inline: 16px; }
   .workbench { grid-template-columns: 1fr; }
   .inspector { border-left: 0; border-top: 1px solid #dce0e5; }
+  .tab-bar { overflow-x: auto; padding-inline: 12px; }
+  .tab-bar [data-slot="tabs-list"] { gap: 14px; min-width: max-content; }
+  .tab-bar [data-slot="tabs-trigger"] { font-size: 12px; }
   .tab-description { display: none; }
   .mode-picker { width: 100%; justify-content: space-between; }
   .mode-picker select { flex: 1; }
@@ -285,6 +335,16 @@ input[type="range"] { display: block; width: 100%; height: 16px; accent-color: #
   .batch-summary > div:nth-child(-n+2) { border-bottom: 1px solid #e0e4e8; }
   .batch-footer { align-items: flex-start; flex-direction: column; padding: 18px; }
   .batch-footer > div { justify-content: flex-start; }
+  .spec-heading { flex-direction: column; padding: 22px 18px; }
+  .spec-actions { justify-content: flex-start; }
+  .spec-flow { grid-template-columns: 1fr 1fr; }
+  .spec-flow > div:nth-child(2) { border-right: 0; }
+  .spec-flow > div:nth-child(-n+2) { border-bottom: 1px solid #e0e4e8; }
+  .spec-grid { grid-template-columns: 1fr; padding: 18px; }
+  .spec-alert { margin: 18px 18px 0; }
+  .candidate-review-panel { margin: 0 18px 18px; }
+  .candidate-actions { align-items: flex-start; flex-direction: column; }
+  .candidate-actions > div { justify-content: flex-start; }
   .decision-workspace { padding: 20px; }
   .decision-heading { flex-direction: column; }
   .decision-grid { grid-template-columns: 1fr; }
@@ -293,8 +353,7 @@ input[type="range"] { display: block; width: 100%; height: 16px; accent-color: #
   .page-heading { gap: 16px; } .heading-actions { gap: 6px; }
   .heading-actions [data-slot="button"] { padding-inline: 11px; font-size: 13px; }
   .workspace-tabs, .message { margin-inline: 8px; }
-  .tab-bar { overflow-x: auto; }
-  .tab-bar [data-slot="tabs-list"] { gap: 18px; min-width: max-content; }
+  .tab-bar [data-slot="tabs-list"] { gap: 12px; }
   .decision-strip { grid-template-columns: 1fr; gap: 8px; }
   .decision-strip > button { justify-self: start; }
   .decision-copy { grid-column: auto; grid-row: auto; }
@@ -303,4 +362,6 @@ input[type="range"] { display: block; width: 100%; height: 16px; accent-color: #
   .bounding-box > span { font-size: 12px; padding: 2px 4px; }
   .bounding-box b { display: none; }
   .viewer-status { gap: 10px; padding-inline: 10px; flex-wrap: wrap; }
+  .spec-flow > div { padding-inline: 12px; }
+  .candidate-rule-heading { align-items: flex-start; flex-direction: column; }
 }

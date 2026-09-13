@@ -12,6 +12,7 @@
       "type": "confidence-review",
       "description": "unconfirmed findings between 30% and 65% confidence",
       "severity": "minor",
+      "source": { "kind": "manual", "documentId": "manual:general-object-safety-demo", "page": null, "evidence": "Unconfirmed findings between 30% and 65% confidence require review." },
       "ignoreBelow": 0.3,
       "reviewBelow": 0.65
     },
@@ -20,6 +21,7 @@
       "type": "defect-class",
       "description": "the prohibited person-in-frame rule",
       "severity": "critical",
+      "source": { "kind": "manual", "documentId": "manual:general-object-safety-demo", "page": null, "evidence": "A person detected in the restricted frame is prohibited." },
       "classes": ["person"],
       "outcome": "FAIL"
     },
@@ -28,6 +30,7 @@
       "type": "defect-class",
       "description": "the foreign-animal rule",
       "severity": "major",
+      "source": { "kind": "manual", "documentId": "manual:general-object-safety-demo", "page": null, "evidence": "Dogs, cats, and birds are treated as foreign objects." },
       "classes": ["dog", "cat", "bird"],
       "outcome": "FAIL"
     },
@@ -36,6 +39,7 @@
       "type": "defect-class",
       "description": "the vehicle-presence confirmation rule",
       "severity": "major",
+      "source": { "kind": "manual", "documentId": "manual:general-object-safety-demo", "page": null, "evidence": "Vehicle detections require manual confirmation." },
       "classes": ["car", "bus", "truck"],
       "outcome": "REVIEW"
     },
@@ -44,6 +48,7 @@
       "type": "maximum-defect-count",
       "description": "no more than two restricted objects may be present",
       "severity": "critical",
+      "source": { "kind": "manual", "documentId": "manual:general-object-safety-demo", "page": null, "evidence": "No more than two restricted objects may be present." },
       "classes": ["person", "dog", "cat", "bird", "car", "bus", "truck"],
       "maximumAllowed": 2,
       "outcome": "FAIL"

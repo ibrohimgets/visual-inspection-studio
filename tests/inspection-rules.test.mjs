@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createReport, reportCsv } from "../lib/detection.ts";
-import { evaluateInspection, normalizeInspectionRuleSet, OUTCOME_PRECEDENCE } from "../lib/inspection-rules.ts";
+import { evaluateInspection, normalizeInspectionRuleSet, OUTCOME_PRECEDENCE,
+  validateInspectionRuleSet } from "../lib/inspection-rules.ts";
 
 const pcbPolicy = JSON.parse(readFileSync(new URL("../inspection/policies/pcb-example.json", import.meta.url), "utf8"));
 const demoPolicy = JSON.parse(readFileSync(new URL("../inspection/policies/general-object-demo.json", import.meta.url), "utf8"));
@@ -12,16 +13,36 @@ const finding = (overrides = {}) => ({ id: 1, label: "SH", confidence: .92, x: 1
 const simplePolicy = (rules = [], overrides = {}) => ({ schemaVersion: 1, id: "test-policy", name: "Test policy",
   version: "1.0.0", description: "Policy used by deterministic unit tests.", defaultOutcome: "PASS",
   defaultSeverity: "none", rules, ...overrides });
+const manualSource = { kind: "manual", documentId: "manual:test-policy", page: null, evidence: "Unit-test policy rule." };
 const classRule = (overrides = {}) => ({ id: "critical-class", type: "defect-class",
-  description: "the critical class rule", severity: "critical", classes: ["SH"], outcome: "FAIL", ...overrides });
+  description: "the critical class rule", severity: "critical", source: manualSource,
+  classes: ["SH"], outcome: "FAIL", ...overrides });
 const confidenceRule = (overrides = {}) => ({ id: "confidence-band", type: "confidence-review",
-  description: "the uncertainty band", severity: "major", ignoreBelow: .3, reviewBelow: .7, ...overrides });
+  description: "the uncertainty band", severity: "major", source: manualSource,
+  ignoreBelow: .3, reviewBelow: .7, ...overrides });
 
 test("tracked policy examples conform to the runtime schema contract", () => {
   assert.equal(schema.properties.schemaVersion.const, 1);
+  assert.equal(validateInspectionRuleSet(pcbPolicy).valid, true);
+  assert.equal(validateInspectionRuleSet(demoPolicy).valid, true);
   assert.deepEqual(normalizeInspectionRuleSet(pcbPolicy).issues, []);
   assert.deepEqual(normalizeInspectionRuleSet(demoPolicy).issues, []);
   assert.deepEqual(OUTCOME_PRECEDENCE, ["FAIL", "REVIEW", "PASS"]);
+});
+
+test("AJV enforces rule-schema.v1.json at runtime", () => {
+  const valid = simplePolicy([classRule()]);
+  assert.deepEqual(validateInspectionRuleSet(valid), { valid: true, issues: [] });
+
+  const invalid = structuredClone(valid);
+  invalid.rules[0].unexpected = "not allowed";
+  const validation = validateInspectionRuleSet(invalid);
+  assert.equal(validation.valid, false);
+  assert.ok(validation.issues.some(issue => issue.keyword === "additionalProperties"));
+
+  delete invalid.rules[0].unexpected;
+  delete invalid.rules[0].source;
+  assert.equal(validateInspectionRuleSet(invalid).valid, false);
 });
 
 test("an image passes when no fail or review rule triggers", () => {
@@ -103,7 +124,7 @@ test("overlapping confidence rules defer when their evidence dispositions confli
 
 test("unsupported and malformed rules fail safely to review", () => {
   const unknown = simplePolicy([{ id: "scratch-length", type: "dimension-threshold",
-    description: "scratch longer than 2 mm", severity: "critical", millimetres: 2 }]);
+    description: "scratch longer than 2 mm", severity: "critical", source: manualSource, millimetres: 2 }]);
   const normalized = normalizeInspectionRuleSet(unknown);
   assert.equal(normalized.ruleSet.rules[0].type, "unsupported");
   assert.equal(normalized.issues.length, 1);

@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Visual Inspection Studio",
   description:
-    "Run local computer-vision inference, review magnified findings, process image batches, and export inspection reports.",
+    "Turn quality-spec PDFs into approved inspection rules, run local computer-vision inference, review findings, and export auditable reports.",
   other: {
     "codex-preview": "development",
   },

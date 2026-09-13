@@ -4,10 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
+import { CLASSES, MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
 import type { Detection, ImageInfo, Review, Run } from "@/lib/detection";
 import { DEFAULT_DETECTOR } from "@/lib/detectors/registry";
-import { evaluateInspection, normalizeInspectionRuleSet } from "@/lib/inspection-rules";
+import { evaluateInspection, normalizeInspectionRuleSet, validateInspectionRuleSet } from "@/lib/inspection-rules";
+import type { InspectionRule, InspectionRuleSet } from "@/lib/inspection-rules";
+import { extractSearchablePdf } from "@/lib/pdf-text";
+import { approveInspectionRuleCandidate, verifyExtractedRuleEvidence } from "@/lib/spec-extraction";
+import type { RuleExtractionResult, SearchableSpecDocument } from "@/lib/spec-extraction";
 import generalObjectDemoPolicy from "@/inspection/policies/general-object-demo.json";
 
 declare global {
@@ -42,8 +46,7 @@ const modeLabel: Record<WorkspaceMode, string> = {
 const percent = (value: number) => (value * 100).toFixed(1) + "%";
 const number = (value: number) => Math.round(value).toLocaleString();
 const DEMO_RULE_SET = normalizeInspectionRuleSet(generalObjectDemoPolicy).ruleSet;
-const applyDemoRules = (detections: readonly Detection[]) => evaluateInspection(detections, DEMO_RULE_SET);
-const configuredOutcome = (rule: (typeof DEMO_RULE_SET.rules)[number]) =>
+const configuredOutcome = (rule: InspectionRule) =>
   rule.type === "confidence-review" || rule.type === "unsupported" ? "REVIEW" : rule.outcome;
 
 export default function Home() {
@@ -68,8 +71,15 @@ export default function Home() {
   const [batch, setBatch] = useState<BatchItem[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
+  const [activeRuleSet, setActiveRuleSet] = useState<InspectionRuleSet>(DEMO_RULE_SET);
+  const [specDocument, setSpecDocument] = useState<SearchableSpecDocument | null>(null);
+  const [ruleCandidate, setRuleCandidate] = useState<RuleExtractionResult | null>(null);
+  const [specStatus, setSpecStatus] = useState("");
+  const [specError, setSpecError] = useState("");
+  const [candidateApproved, setCandidateApproved] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const batchInputRef = useRef<HTMLInputElement>(null);
+  const specInputRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const cropRef = useRef<HTMLCanvasElement>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -82,7 +92,7 @@ export default function Home() {
   const busy = phase !== "";
   const items = useMemo(() => run?.detections ?? [], [run]);
   const visible = useMemo(() => visibleDetections(items, threshold, hiddenClasses, reviewFilter), [items, threshold, hiddenClasses, reviewFilter]);
-  const inspectionDecision = useMemo(() => run ? applyDemoRules(items) : null, [items, run]);
+  const inspectionDecision = useMemo(() => run ? evaluateInspection(items, activeRuleSet) : null, [activeRuleSet, items, run]);
   const selected = visible.find(item => item.id === selectedId) ?? null;
   const classes = Array.from(new Set(items.map(item => item.label))).sort();
   const accepted = items.filter(item => item.review === "accepted").length;
@@ -93,6 +103,70 @@ export default function Home() {
   const batchMeanLatency = completedBatch.length
     ? completedBatch.reduce((total, item) => total + (item.run?.inferenceMs ?? 0), 0) / completedBatch.length
     : 0;
+  const specBusy = specStatus !== "";
+  const activePolicyOrigin = activeRuleSet.rules.some(rule => rule.source.kind === "document") ? "Approved PDF policy" : "Hand-written policy";
+
+  async function extractSpecRules(file?: File) {
+    if (!file || specBusy) return;
+    setSpecError(""); setRuleCandidate(null); setCandidateApproved(false); setSpecDocument(null);
+    setSpecStatus("Reading searchable PDF…");
+    try {
+      const document = await extractSearchablePdf(file, [...CLASSES]);
+      setSpecDocument(document);
+      setSpecStatus("Extracting a structured rule candidate…");
+      const response = await fetch("/api/specs/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(document),
+      });
+      const body = await response.json() as RuleExtractionResult & { error?: { code?: string; message?: string } };
+      if (!response.ok) throw new Error(body.error?.message || "Rule extraction failed safely.");
+      const contract = validateInspectionRuleSet(body.candidate);
+      const evidenceIssues = verifyExtractedRuleEvidence(body.candidate, document);
+      if (!contract.valid || evidenceIssues.length) throw new Error("The extracted candidate failed local contract or evidence validation.");
+      setRuleCandidate(body);
+      setNotice(`${body.candidate.rules.length} candidate rules extracted. Approval is still required.`);
+    } catch (cause) {
+      setRuleCandidate(null);
+      setSpecError(cause instanceof Error ? cause.message : "Rule extraction failed safely. No policy was activated.");
+    } finally {
+      setSpecStatus("");
+    }
+  }
+
+  async function loadExampleSpec() {
+    if (specBusy) return;
+    setSpecError(""); setSpecStatus("Loading the example quality specification…");
+    try {
+      const response = await fetch("/examples/factory-quality-spec-example.pdf", { cache: "no-store" });
+      if (!response.ok) throw new Error("The example PDF is unavailable.");
+      const blob = await response.blob();
+      const file = new File([blob], "factory-quality-spec-example.pdf", { type: "application/pdf" });
+      setSpecStatus("");
+      await extractSpecRules(file);
+    } catch (cause) {
+      setSpecStatus("");
+      setSpecError(cause instanceof Error ? cause.message : "The example PDF could not be loaded.");
+    }
+  }
+
+  function approveCandidate() {
+    if (!ruleCandidate || !specDocument) return;
+    try {
+      const approved = approveInspectionRuleCandidate(ruleCandidate.candidate, specDocument);
+      setActiveRuleSet(approved);
+      setCandidateApproved(true);
+      setNotice(`${approved.name} is now the active inspection policy.`);
+    } catch (cause) {
+      setSpecError(cause instanceof Error ? cause.message : "This candidate could not be approved.");
+    }
+  }
+
+  function restoreDefaultPolicy() {
+    setActiveRuleSet(DEMO_RULE_SET);
+    setCandidateApproved(false);
+    setNotice("The hand-written demonstration policy is active again.");
+  }
 
   function changeMode(next: WorkspaceMode) {
     if (next === mode || !canReplace()) return;
@@ -382,6 +456,8 @@ export default function Home() {
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  const activeRuleSetRef = useRef(activeRuleSet);
+  useEffect(() => { activeRuleSetRef.current = activeRuleSet; }, [activeRuleSet]);
   useEffect(() => {
     if (!document.modelContext?.registerTool) return;
     const controller = new AbortController();
@@ -395,7 +471,7 @@ export default function Home() {
         if (dirtyRef.current) throw new Error("Export review changes before running detection again.");
         if (modeRef.current !== "general") throw new Error("Surface defect inspection is not configured yet. Train and export a domain-specific model first.");
         const result = await actionRef.current();
-        const decision = applyDemoRules(result.detections);
+        const decision = evaluateInspection(result.detections, activeRuleSetRef.current);
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         return { status: "complete", mode: "general-object", model: MODEL.name, candidates: result.detections.length,
           inferenceMs: result.inferenceMs, inspectionOutcome: decision.outcome, severity: decision.severity };
@@ -441,7 +517,7 @@ export default function Home() {
       { minimumConfidence: threshold / 100, hiddenClasses: [], review: "all" },
       "filtered",
       "general-object",
-      applyDemoRules((item.run as Run).detections),
+      evaluateInspection((item.run as Run).detections, activeRuleSet),
     ));
     if (!reports.length) return;
     if (format === "json") {
@@ -461,7 +537,7 @@ export default function Home() {
     <main className="studio">
       <header className="app-header">
         <div className="wordmark">Visual Inspection <span>Studio</span></div>
-        <div className="header-meta">Local inference · Deterministic rules · Structured reports <span className="version">v0.4</span></div>
+        <div className="header-meta">Local vision · Approved spec rules · Structured reports <span className="version">v0.5</span></div>
       </header>
       <div className="page-heading">
         <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspect, review, export</h1><p className="heading-copy">Run a real detector, verify each region, and download an audit-ready report.</p></div>
@@ -479,7 +555,7 @@ export default function Home() {
       <div className="sr-only" role="status" aria-live="polite">{phase || notice}</div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="workspace-tabs">
         <div className="tab-bar">
-          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="decision">Rules & decision</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
+          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="spec">Quality spec</TabsTrigger><TabsTrigger value="decision">Rules & decision</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
           <span className="tab-description">{mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No results generated</>}</span>
         </div>
         {mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured</strong><p>This workspace is ready for a trained defect model, but it will not invent scratches, dents, cracks, or rust results. Use General Object Detection for the working YOLOX demo.</p></div><a href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Review recommended model path</a></div>}
@@ -584,18 +660,70 @@ export default function Home() {
           {batch.length ? <>
             <div className="batch-table-scroll"><table className="batch-table"><thead><tr><th>Image</th><th>Status</th><th>Findings ≥ {threshold}%</th><th>Decision</th><th>Inference</th><th>Action</th></tr></thead>
               <tbody>{batch.map(item => {
-                const decision = item.run ? applyDemoRules(item.run.detections) : null;
+                const decision = item.run ? evaluateInspection(item.run.detections, activeRuleSet) : null;
                 return <tr key={item.id}><td><strong title={item.name}>{item.name}</strong><span>{number(item.width)} × {number(item.height)} px</span></td><td><span className={`batch-status ${item.status}`}>{item.status === "complete" ? "Complete" : item.status === "running" ? "Inspecting" : item.status === "failed" ? "Needs retry" : "Queued"}</span>{item.error && <small title={item.error}>{item.error}</small>}</td><td className="mono">{item.run ? item.run.detections.filter(detection => detection.confidence * 100 >= threshold).length : "—"}</td><td>{decision ? <span className={`decision-badge ${decision.outcome.toLowerCase()}`}>{decision.outcome}</span> : "—"}</td><td className="mono">{item.run ? number(item.run.inferenceMs) + " ms" : "—"}</td><td><Button variant="outline" size="sm" disabled={!item.run || batchRunning} onClick={() => openBatchResult(item)}>Open review</Button></td></tr>;
               })}</tbody>
             </table></div>
             <div className="batch-footer"><p>Exports include image metadata, coordinates, confidence, timing, reviewer corrections, and the deterministic rule decision.</p><div><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("json")}>Download batch JSON</Button><Button variant="outline" disabled={!completedBatch.length || batchRunning} onClick={() => exportBatch("csv")}>Download batch CSV</Button><Button variant="outline" disabled={batchRunning} onClick={clearBatch}>Clear batch</Button></div></div>
           </> : <div className="batch-empty"><strong>No images queued</strong><p>Add PNG, JPEG, or WebP images. Processing stays in this browser; files are not uploaded to a server.</p><Button onClick={() => batchInputRef.current?.click()}>Choose images</Button></div>}
         </TabsContent>
+        <TabsContent value="spec" className="spec-workspace">
+          <div className="spec-heading">
+            <div><p className="breadcrumb">Specification intake</p><h2>Turn a quality PDF into reviewable rules</h2><p>Upload a searchable PDF. Its text is extracted in the browser, the configured LLM proposes structured rules, AJV validates them, and a person must approve the candidate before it can affect inspection decisions.</p></div>
+            <div className="spec-actions">
+              <input ref={specInputRef} type="file" className="sr-only" aria-label="Choose quality specification PDF" accept="application/pdf,.pdf"
+                onChange={event => { void extractSpecRules(event.target.files?.[0]); event.target.value = ""; }} />
+              <Button variant="outline" onClick={() => void loadExampleSpec()} disabled={specBusy}>{specBusy ? specStatus : "Run example PDF"}</Button>
+              <Button onClick={() => specInputRef.current?.click()} disabled={specBusy}>{specBusy ? "Processing…" : "Upload quality PDF"}</Button>
+            </div>
+          </div>
+          <div className="spec-flow" aria-label="Specification processing steps">
+            <div className={specDocument ? "complete" : "active"}><span>01</span><strong>Read PDF</strong><small>Searchable text only</small></div>
+            <div className={ruleCandidate ? "complete" : specDocument ? "active" : ""}><span>02</span><strong>Extract rules</strong><small>Strict model JSON</small></div>
+            <div className={ruleCandidate ? "complete" : ""}><span>03</span><strong>Validate</strong><small>Schema + evidence</small></div>
+            <div className={candidateApproved ? "complete" : ruleCandidate ? "active" : ""}><span>04</span><strong>Human approval</strong><small>Never automatic</small></div>
+          </div>
+          {specError && <div className="spec-alert error" role="alert"><strong>Candidate not activated</strong><p>{specError}</p></div>}
+          {specStatus && <div className="spec-alert" role="status"><strong>Processing document</strong><p>{specStatus}</p></div>}
+          <div className="spec-grid">
+            <section className="spec-document-panel">
+              <div className="panel-heading"><div><span>SOURCE DOCUMENT</span><h3>{specDocument?.fileName ?? "No PDF loaded"}</h3></div>{specDocument && <span>{specDocument.pages.length} page{specDocument.pages.length === 1 ? "" : "s"}</span>}</div>
+              {specDocument ? <>
+                <dl className="properties spec-properties"><div><dt>Document fingerprint</dt><dd title={specDocument.documentId}>{specDocument.documentId.slice(0, 18)}…</dd></div><div><dt>Selectable text</dt><dd>{number(specDocument.pages.reduce((total, page) => total + page.text.length, 0))} characters</dd></div><div><dt>Detector vocabulary</dt><dd>{specDocument.supportedClasses.length} labels supplied</dd></div></dl>
+                <p className="spec-privacy">The PDF is parsed locally. Only extracted, page-labelled text is sent through this application&apos;s server to the configured OpenAI model. Images are not sent with the specification.</p>
+              </> : <div className="spec-empty"><strong>Searchable PDFs only</strong><p>Scanned-image PDFs, password-protected files, and documents over 25 pages are rejected in this first version.</p></div>}
+            </section>
+            <section className="spec-candidate-panel">
+              <div className="panel-heading"><div><span>RULE CANDIDATE</span><h3>{ruleCandidate?.candidate.name ?? "Waiting for extraction"}</h3></div>{ruleCandidate && <span>{ruleCandidate.candidate.rules.length} rules</span>}</div>
+              {ruleCandidate ? <>
+                <div className="validation-row"><span className="validation-badge valid">AJV contract valid</span><span className="validation-badge valid">Evidence verified</span><span className={`validation-badge ${candidateApproved ? "active" : "pending"}`}>{candidateApproved ? "Approved and active" : "Approval required"}</span></div>
+                <dl className="properties spec-properties"><div><dt>Model</dt><dd>{ruleCandidate.provider.model}</dd></div><div><dt>Extraction latency</dt><dd>{number(ruleCandidate.provider.latencyMs)} ms</dd></div><div><dt>Token usage</dt><dd>{ruleCandidate.provider.usage.totalTokens ?? "Not reported"}</dd></div></dl>
+              </> : <div className="spec-empty"><strong>No generated policy is active</strong><p>Loading or uploading a PDF creates a candidate only. The current hand-written policy remains unchanged until approval.</p></div>}
+            </section>
+          </div>
+          {ruleCandidate && <section className="candidate-review-panel">
+            <div className="panel-heading"><div><span>HUMAN REVIEW GATE</span><h3>Verify each requirement against its source</h3></div><span>{candidateApproved ? "Policy active" : "Not active"}</span></div>
+            <ol className="candidate-rules">{ruleCandidate.candidate.rules.map(rule => <li key={rule.id}>
+              <div className="candidate-rule-heading"><div><span className="mono">{rule.id}</span><strong>{rule.description}</strong></div><span className={`decision-badge ${configuredOutcome(rule).toLowerCase()}`}>{configuredOutcome(rule)}</span></div>
+              <div className="candidate-rule-meta"><span>{rule.type}</span><span>{rule.severity} severity</span><span>Page {rule.source.page}</span></div>
+              <blockquote>{rule.source.evidence}</blockquote>
+              {rule.type === "unsupported" && <p className="unsupported-reason"><strong>Requires review:</strong> {rule.reason}</p>}
+            </li>)}</ol>
+            <div className="candidate-actions">
+              <p>{candidateApproved ? "This approved policy now controls deterministic PASS / FAIL / REVIEW outcomes. The LLM is no longer involved." : "Approval copies this validated candidate into the deterministic engine. It does not rerun the model or make an image decision."}</p>
+              <div>
+                <Button variant="outline" onClick={() => downloadFile(JSON.stringify(ruleCandidate.candidate, null, 2), `${ruleCandidate.candidate.id}.json`, "application/json")}>Download candidate JSON</Button>
+                {!candidateApproved && <Button variant="outline" onClick={() => { setRuleCandidate(null); setSpecDocument(null); setSpecError(""); }}>Discard candidate</Button>}
+                {candidateApproved ? <Button variant="outline" onClick={restoreDefaultPolicy}>Restore default policy</Button> : <Button onClick={approveCandidate}>Approve &amp; activate policy</Button>}
+              </div>
+            </div>
+          </section>}
+        </TabsContent>
         <TabsContent value="decision" className="decision-workspace">
-          <div className="decision-heading"><div><p className="breadcrumb">Deterministic inspection logic</p><h2>Rules & decision trace</h2><p>Detector findings are qualified, evaluated, and resolved with the same versioned policy on every run. Display filters never change the inspection decision.</p></div><span className="policy-version">Schema v{DEMO_RULE_SET.schemaVersion} · Policy {DEMO_RULE_SET.version}</span></div>
+          <div className="decision-heading"><div><p className="breadcrumb">Deterministic inspection logic</p><h2>Rules & decision trace</h2><p>Detector findings are qualified, evaluated, and resolved with the same validated policy on every run. Display filters and the LLM never make the final inspection decision.</p></div><span className="policy-version">Schema v{activeRuleSet.schemaVersion} · Policy {activeRuleSet.version}</span></div>
           <div className="decision-grid">
-            <section className="policy-panel"><div className="panel-heading"><div><span>ACTIVE HAND-WRITTEN POLICY</span><h3>{DEMO_RULE_SET.name}</h3></div><span>{DEMO_RULE_SET.rules.length} rules</span></div><p className="policy-note">{DEMO_RULE_SET.description}</p>
-              <ol className="policy-rules">{DEMO_RULE_SET.rules.map(rule => <li key={rule.id}><div><strong>{rule.description}</strong><span className="mono">{rule.id}</span></div><div><span className={`decision-badge ${configuredOutcome(rule).toLowerCase()}`}>{configuredOutcome(rule)}</span><small>{rule.type} · {rule.severity}</small></div></li>)}</ol>
+            <section className="policy-panel"><div className="panel-heading"><div><span>ACTIVE {activePolicyOrigin.toUpperCase()}</span><h3>{activeRuleSet.name}</h3></div><div className="policy-panel-actions"><span>{activeRuleSet.rules.length} rules</span>{activePolicyOrigin === "Approved PDF policy" && <Button variant="outline" size="sm" onClick={restoreDefaultPolicy}>Restore default</Button>}</div></div><p className="policy-note">{activeRuleSet.description}</p>
+              <ol className="policy-rules">{activeRuleSet.rules.map(rule => <li key={rule.id}><div><strong>{rule.description}</strong><span className="mono">{rule.id}</span></div><div><span className={`decision-badge ${configuredOutcome(rule).toLowerCase()}`}>{configuredOutcome(rule)}</span><small>{rule.type} · {rule.severity}</small></div></li>)}</ol>
             </section>
             <section className="live-decision-panel"><div className="panel-heading"><div><span>CURRENT IMAGE</span><h3>Inspection disposition</h3></div></div>
               {inspectionDecision ? <><div className={`large-decision ${inspectionDecision.outcome.toLowerCase()}`}><span>{inspectionDecision.outcome}</span><small>{inspectionDecision.severity} severity</small></div><p>{inspectionDecision.summary}</p><dl className="properties decision-properties"><div><dt>Actionable findings</dt><dd>{inspectionDecision.evidence.actionableDetectionIds.length}</dd></div><div><dt>Waiting for review</dt><dd>{inspectionDecision.evidence.reviewDetectionIds.length}</dd></div><div><dt>Excluded findings</dt><dd>{inspectionDecision.evidence.excludedDetectionIds.length}</dd></div><div><dt>Precedence</dt><dd>FAIL › REVIEW › PASS</dd></div></dl></> : <div className="decision-empty"><strong>No decision yet</strong><p>Run detection to evaluate the current image against this policy.</p></div>}
@@ -624,7 +752,7 @@ export default function Home() {
           <section><h3>Known limits</h3><p>The hosted model recognizes 80 everyday COCO categories, not PCB defects. The trained PCB checkpoint is evaluated offline and is not presented as browser inference until its export is verified. Prior Terra routing is retained as a negative baseline and adds no accuracy claim.</p><a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX model documentation</a></section></div>
         </TabsContent>
       </Tabs>
-      <footer className="app-footer"><span>Images are processed on this device. Export your results before leaving.</span><span>YOLOX-Nano · Apache-2.0</span></footer>
+      <footer className="app-footer"><span>Image inference stays on-device. PDF text is sent to the configured LLM only when you request rule extraction.</span><span>YOLOX-Nano · PDF.js · AJV</span></footer>
     </main>
   );
 }
