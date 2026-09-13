@@ -1,6 +1,6 @@
 {
   "name": "visual-inspection-studio",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -29,6 +29,7 @@
     "hybrid:validation": "node scripts/run-hybrid-validation.mjs",
     "rules:examples": "node scripts/run-rule-examples.mjs",
     "spec:example": "node scripts/run-spec-pipeline-example.mjs",
+    "demo:prepare": "node scripts/prepare-public-demo.mjs",
     "schema:generate": "node scripts/generate-schema-validators.mjs",
     "schema:check": "node scripts/generate-schema-validators.mjs --check",
     "db:generate": "drizzle-kit generate"

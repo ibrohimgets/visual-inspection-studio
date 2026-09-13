@@ -1,4 +1,4 @@
-"""Create the searchable quality-spec PDF used by the hosted extraction demo."""
+"""Create the searchable PCB quality-spec PDF used by the public demo."""
 
 from pathlib import Path
 import sys
@@ -11,17 +11,17 @@ from reportlab.lib.units import mm
 from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
-OUTPUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("output/pdf/factory-quality-spec-example.pdf")
+OUTPUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("output/pdf/pcb-quality-spec-example.pdf")
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
-NAVY = colors.HexColor("#18344F")
-BLUE = colors.HexColor("#2E628F")
-PALE_BLUE = colors.HexColor("#EDF4F9")
-INK = colors.HexColor("#283643")
-MUTED = colors.HexColor("#657483")
-LINE = colors.HexColor("#D8E0E7")
-PALE_AMBER = colors.HexColor("#FFF6E5")
-AMBER = colors.HexColor("#8A5A12")
+NAVY = colors.HexColor("#142D3F")
+PALE_BLUE = colors.HexColor("#EDF4F7")
+INK = colors.HexColor("#25343E")
+MUTED = colors.HexColor("#657681")
+LINE = colors.HexColor("#D6E0E5")
+PALE_AMBER = colors.HexColor("#FFF5DF")
+AMBER = colors.HexColor("#835611")
+PALE_GREEN = colors.HexColor("#EDF6F1")
 
 styles = getSampleStyleSheet()
 styles.add(ParagraphStyle(name="DocTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=20,
@@ -45,14 +45,14 @@ def header_footer(canvas, doc):
     canvas.rect(0, height - 10 * mm, width, 10 * mm, fill=1, stroke=0)
     canvas.setFillColor(colors.white)
     canvas.setFont("Helvetica-Bold", 8)
-    canvas.drawString(18 * mm, height - 6.5 * mm, "NORTHSTAR ASSEMBLY SYSTEMS")
+    canvas.drawString(18 * mm, height - 6.5 * mm, "NORTHSTAR ELECTRONICS")
     canvas.setFont("Helvetica", 8)
     canvas.drawRightString(width - 18 * mm, height - 6.5 * mm, "CONTROLLED QUALITY DOCUMENT")
     canvas.setStrokeColor(LINE)
     canvas.line(18 * mm, 14 * mm, width - 18 * mm, 14 * mm)
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 7.5)
-    canvas.drawString(18 * mm, 9.5 * mm, "QSP-CV-001  |  Revision 1.0  |  Training / portfolio example")
+    canvas.drawString(18 * mm, 9.5 * mm, "QSP-PCB-017 | Revision 1.0 | Portfolio demonstration")
     canvas.drawRightString(width - 18 * mm, 9.5 * mm, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -68,20 +68,20 @@ doc = SimpleDocTemplate(
     leftMargin=18 * mm,
     topMargin=20 * mm,
     bottomMargin=20 * mm,
-    title="Packaging Line Camera Quality Specification",
+    title="PCB Camera Inspection Acceptance Specification",
     author="Visual Inspection Studio",
-    subject="Searchable example specification for structured inspection-rule extraction",
+    subject="Searchable portfolio specification for structured PCB inspection-rule extraction",
 )
 
 story = [
     Spacer(1, 3 * mm),
-    Paragraph("Packaging Line Camera<br/>Quality Specification", styles["DocTitle"]),
-    Paragraph("Example specification for automated visual inspection and human review routing", styles["Subtitle"]),
+    Paragraph("PCB Camera Inspection<br/>Acceptance Specification", styles["DocTitle"]),
+    Paragraph("Example requirements for detector findings, deterministic disposition, and human review", styles["Subtitle"]),
     Table(
         [
-            ["Document", "QSP-CV-001", "Revision", "1.0"],
+            ["Document", "QSP-PCB-017", "Revision", "1.0"],
             ["Owner", "Quality Engineering", "Effective", "13 September 2026"],
-            ["Applies to", "Restricted packaging-line camera", "Status", "Example / not production"],
+            ["Applies to", "PCB optical inspection cell", "Status", "Example / not production"],
         ],
         colWidths=[24 * mm, 61 * mm, 24 * mm, 62 * mm],
         style=TableStyle([
@@ -97,24 +97,24 @@ story = [
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ]),
     ),
-    Paragraph("1. Purpose and scope", styles["Section"]),
+    Paragraph("1. Purpose and decision authority", styles["Section"]),
     Paragraph(
-        "This specification defines camera-visible acceptance rules for a restricted packaging-line inspection frame. "
-        "The automated system may propose a disposition, but a quality engineer remains responsible for approving extracted rules and resolving review cases.",
+        "This example defines image-level acceptance logic for a PCB optical inspection cell. The detector supplies candidate regions and confidence scores. The approved deterministic policy supplies the final PASS, FAIL, or HUMAN REVIEW disposition.",
         styles["Small"],
     ),
-    Paragraph("2. Object and count requirements", styles["Section"]),
-    rule("2.1", "Personnel exclusion", "Any person observed inside the restricted camera frame is a critical defect and the inspection result must be REJECT."),
-    rule("2.2", "Foreign animal exclusion", "Any dog, cat, or bird visible in the restricted camera frame is a major foreign-object defect and the inspection result must be REJECT."),
-    rule("2.3", "Maximum restricted-object count", "No more than two restricted objects (person, dog, cat, bird, car, bus, or truck) may be present in one image. Three or more restricted objects require REJECT."),
-    rule("2.4", "Vehicle escalation", "Any car, bus, or truck detection requires HUMAN REVIEW before disposition."),
+    rule("1.1", "Approval gate", "Rules extracted from this document are draft candidates only. A quality engineer must verify the cited source evidence and explicitly approve the complete policy before it can control an inspection."),
+    Paragraph("2. Defect-class requirements", styles["Section"]),
+    rule("2.1", "Critical circuit defects", "Any open-circuit (OP) or short-circuit (SH) finding is critical and must result in FAIL."),
+    rule("2.2", "Conductor scratches", "A conductor-scratch (CS) finding requires HUMAN REVIEW before disposition."),
+    rule("2.3", "Cosmetic spur allowance", "A spur (SP) finding is acceptable for this demonstration and may PASS when no higher-priority rule applies."),
+    rule("2.4", "Maximum finding count", "More than two actionable PCB defect findings in one image must result in FAIL."),
     Spacer(1, 4 * mm),
     Table(
-        [[Paragraph("Important: rule extraction creates a draft only. No generated rule may become active until a quality engineer reviews its source evidence and explicitly approves it.", styles["Callout"])]],
+        [[Paragraph("This document is a portfolio example, not a factory acceptance standard. A client must replace these limits with validated production requirements.", styles["Callout"])]],
         colWidths=[171 * mm],
         style=TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), PALE_AMBER),
-            ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#E3C994")),
+            ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#DFC58D")),
             ("LEFTPADDING", (0, 0), (-1, -1), 10),
             ("RIGHTPADDING", (0, 0), (-1, -1), 10),
             ("TOPPADDING", (0, 0), (-1, -1), 9),
@@ -123,20 +123,37 @@ story = [
     ),
     PageBreak(),
     Spacer(1, 3 * mm),
-    Paragraph("Confidence, measurement, and escalation", styles["DocTitle"]),
-    Paragraph("Requirements that exceed detector capability must fail safely to human review", styles["Subtitle"]),
-    Paragraph("3. Confidence handling", styles["Section"]),
-    rule("3.1", "Unconfirmed findings", "Unconfirmed detector findings from 30 percent up to but below 65 percent confidence require HUMAN REVIEW. Findings below 30 percent may be ignored as insufficient evidence."),
-    Paragraph("4. Requirements outside the current detector contract", styles["Section"]),
-    rule("4.1", "Scratch measurement", "A surface scratch longer than 2 mm requires REJECT."),
-    rule("4.2", "Missing component", "A missing soldered component requires REJECT."),
+    Paragraph("Confidence and capability controls", styles["DocTitle"]),
+    Paragraph("Uncertain or unsupported requirements fail safely to human review", styles["Subtitle"]),
+    Paragraph("3. Detector confidence", styles["Section"]),
+    rule("3.1", "Unconfirmed findings", "Findings below 30 percent confidence may be ignored. Findings from 30 percent up to but below 70 percent confidence require HUMAN REVIEW."),
+    Paragraph("4. Scope boundary", styles["Section"]),
     Paragraph(
-        "Requirements 4.1 and 4.2 are mandatory quality requirements, but this example does not define camera calibration, millimetre conversion, a scratch detector, a reference assembly, or component-presence logic. The inspection system must route these requirements to HUMAN REVIEW until the required sensing and detector capabilities are validated.",
+        "Calibrated length measurements and missing-component checks are outside this example policy. A client deployment must add camera calibration, a reference assembly, and validated detector capabilities before those requirements can be automated. Any future requirement that the active detector or rule engine cannot evaluate must produce HUMAN REVIEW rather than an automatic PASS or FAIL.",
         styles["Small"],
     ),
-    Paragraph("5. Rule approval and decision authority", styles["Section"]),
-    rule("5.1", "Approval gate", "LLM-extracted rules are candidates only and must not be activated automatically."),
-    rule("5.2", "Decision authority", "The deterministic inspection engine applies approved rules to detector findings. The LLM must not make the final PASS, FAIL, or HUMAN REVIEW decision for an inspected image."),
+    Spacer(1, 6 * mm),
+    Table(
+        [["Disposition", "Meaning", "Required action"],
+         ["PASS", "No fail or review rule triggered", "Release under approved process"],
+         ["FAIL", "One or more fail rules triggered", "Reject and record decisive evidence"],
+         ["HUMAN REVIEW", "Uncertain or unsupported requirement", "Quality engineer resolves disposition"]],
+        colWidths=[30 * mm, 69 * mm, 72 * mm],
+        style=TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 1), (-1, -1), PALE_GREEN),
+            ("TEXTCOLOR", (0, 1), (-1, -1), INK),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.5, LINE),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]),
+    ),
     Spacer(1, 7 * mm),
     KeepTogether([
         Paragraph("Approval record", styles["Section"]),

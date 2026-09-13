@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { ArrowRight, ClipboardCheck, FileDown, FileText, LockKeyhole, ScanLine, ShieldCheck, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CLASSES, MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
@@ -12,6 +13,8 @@ import type { InspectionRule, InspectionRuleSet } from "@/lib/inspection-rules";
 import { extractSearchablePdf } from "@/lib/pdf-text";
 import { approveInspectionRuleCandidate, verifyExtractedRuleEvidence } from "@/lib/spec-extraction";
 import type { RuleExtractionResult, SearchableSpecDocument } from "@/lib/spec-extraction";
+import { PUBLIC_DEMO } from "@/lib/public-demo";
+import type { PublicDemoSample } from "@/lib/public-demo";
 import generalObjectDemoPolicy from "@/inspection/policies/general-object-demo.json";
 
 declare global {
@@ -28,6 +31,7 @@ declare global {
 
 const SAMPLE = { name: "objects-sample.jpg", source: "sample" as const, width: 0, height: 0 };
 type WorkspaceMode = "general" | "surface-defect";
+type AccessMode = "checking" | "public" | "owner";
 type BatchStatus = "queued" | "running" | "complete" | "failed";
 type BatchItem = {
   id: number;
@@ -67,7 +71,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [opening, setOpening] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [activeTab, setActiveTab] = useState("review");
+  const [activeTab, setActiveTab] = useState("overview");
   const [batch, setBatch] = useState<BatchItem[]>([]);
   const [batchRunning, setBatchRunning] = useState(false);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
@@ -77,6 +81,9 @@ export default function Home() {
   const [specStatus, setSpecStatus] = useState("");
   const [specError, setSpecError] = useState("");
   const [candidateApproved, setCandidateApproved] = useState(false);
+  const [accessMode, setAccessMode] = useState<AccessMode>("checking");
+  const [workspaceAccess, setWorkspaceAccess] = useState<"public" | "owner">("public");
+  const [activeDemoSampleId, setActiveDemoSampleId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const batchInputRef = useRef<HTMLInputElement>(null);
   const specInputRef = useRef<HTMLInputElement>(null);
@@ -104,10 +111,27 @@ export default function Home() {
     ? completedBatch.reduce((total, item) => total + (item.run?.inferenceMs ?? 0), 0) / completedBatch.length
     : 0;
   const specBusy = specStatus !== "";
+  const ownerLive = accessMode === "owner" && workspaceAccess === "owner";
+  const activeDemoSample = PUBLIC_DEMO.samples.find(sample => sample.id === activeDemoSampleId) ?? null;
+  const inspectionInteractive = mode === "general" || activeDemoSample !== null;
+  const activeModel = run?.model ?? MODEL;
   const activePolicyOrigin = activeRuleSet.rules.some(rule => rule.source.kind === "document") ? "Approved PDF policy" : "Hand-written policy";
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/session", { cache: "no-store" })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("Session unavailable")))
+      .then(session => { if (active) setAccessMode(session && typeof session === "object" && "mode" in session && session.mode === "owner" ? "owner" : "public"); })
+      .catch(() => { if (active) setAccessMode("public"); });
+    return () => { active = false; };
+  }, []);
 
   async function extractSpecRules(file?: File) {
     if (!file || specBusy) return;
+    if (!ownerLive) {
+      setSpecError("Live LLM extraction is locked in the public demo. Use the recorded example, which makes zero paid API calls.");
+      return;
+    }
     setSpecError(""); setRuleCandidate(null); setCandidateApproved(false); setSpecDocument(null);
     setSpecStatus("Reading searchable PDF…");
     try {
@@ -134,7 +158,7 @@ export default function Home() {
     }
   }
 
-  async function loadExampleSpec() {
+  async function loadExampleSpec(forceRecorded = false) {
     if (specBusy) return;
     setSpecError(""); setSpecStatus("Loading the example quality specification…");
     try {
@@ -142,12 +166,58 @@ export default function Home() {
       if (!response.ok) throw new Error("The example PDF is unavailable.");
       const blob = await response.blob();
       const file = new File([blob], "factory-quality-spec-example.pdf", { type: "application/pdf" });
-      setSpecStatus("");
-      await extractSpecRules(file);
+      if (ownerLive && !forceRecorded) {
+        setSpecStatus("");
+        await extractSpecRules(file);
+        return;
+      }
+      setSpecStatus("Verifying the recorded candidate against the PDF…");
+      const document = await extractSearchablePdf(file, PUBLIC_DEMO.spec.document.supportedClasses);
+      if (document.documentId !== PUBLIC_DEMO.spec.document.documentId) throw new Error("The example PDF fingerprint does not match the recorded extraction.");
+      const contract = validateInspectionRuleSet(PUBLIC_DEMO.spec.extraction.candidate);
+      const evidenceIssues = verifyExtractedRuleEvidence(PUBLIC_DEMO.spec.extraction.candidate, document);
+      if (!contract.valid || evidenceIssues.length) throw new Error("The recorded candidate failed contract or evidence validation.");
+      setSpecDocument(document);
+      setRuleCandidate(structuredClone(PUBLIC_DEMO.spec.extraction));
+      setCandidateApproved(false);
+      setNotice("Recorded candidate loaded and verified. No API call was made; explicit approval is still required.");
     } catch (cause) {
-      setSpecStatus("");
       setSpecError(cause instanceof Error ? cause.message : "The example PDF could not be loaded.");
+    } finally {
+      setSpecStatus("");
     }
+  }
+
+  function startPublicDemo() {
+    setWorkspaceAccess("public");
+    setActiveTab("spec");
+    void loadExampleSpec(true);
+  }
+
+  function openPublicSample(sample: PublicDemoSample) {
+    if (!candidateApproved) {
+      setActiveTab("spec");
+      setNotice("Review and approve the recorded rule candidate before opening inspection outcomes.");
+      if (!ruleCandidate) void loadExampleSpec(true);
+      return;
+    }
+    if (!canReplace()) return;
+    uploadRevision.current++;
+    setOpening(false);
+    clearResults();
+    if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    blobRef.current = null;
+    setMode("surface-defect");
+    setActiveDemoSampleId(sample.id);
+    setReady(false);
+    setImageUrl(sample.imagePath);
+    setImage({ name: `${sample.title} · ${sample.imageId.split(":").at(-1)}`, source: "sample", width: sample.width, height: sample.height });
+    setRun(structuredClone(sample.run));
+    setThreshold(30);
+    setSelectedId(sample.run.detections[0]?.id ?? null);
+    setActiveBatchId(null);
+    setActiveTab("review");
+    setNotice(`Recorded ${sample.expectedOutcome} validation case loaded. No model or LLM API call was made.`);
   }
 
   function approveCandidate() {
@@ -156,7 +226,7 @@ export default function Home() {
       const approved = approveInspectionRuleCandidate(ruleCandidate.candidate, specDocument);
       setActiveRuleSet(approved);
       setCandidateApproved(true);
-      setNotice(`${approved.name} is now the active inspection policy.`);
+      setNotice(`${approved.name} is active. The PASS, REVIEW, and FAIL PCB examples are now unlocked.`);
     } catch (cause) {
       setSpecError(cause instanceof Error ? cause.message : "This candidate could not be approved.");
     }
@@ -165,12 +235,14 @@ export default function Home() {
   function restoreDefaultPolicy() {
     setActiveRuleSet(DEMO_RULE_SET);
     setCandidateApproved(false);
+    setActiveDemoSampleId(null);
     setNotice("The hand-written demonstration policy is active again.");
   }
 
   function changeMode(next: WorkspaceMode) {
     if (next === mode || !canReplace()) return;
     clearResults();
+    setActiveDemoSampleId(null);
     setMode(next);
     setNotice(next === "surface-defect"
       ? "Surface defect mode selected. A trained domain model is required before inference."
@@ -267,6 +339,7 @@ export default function Home() {
       if (ticket !== uploadRevision.current) { URL.revokeObjectURL(url); return; }
       if (decoded.naturalWidth * decoded.naturalHeight > 40_000_000) throw new Error("Choose an image smaller than 40 megapixels.");
       clearResults();
+      setActiveDemoSampleId(null);
       if (blobRef.current) URL.revokeObjectURL(blobRef.current);
       blobRef.current = url;
       setReady(false); setImageUrl(url);
@@ -280,6 +353,7 @@ export default function Home() {
   function loadSample() {
     if (!canReplace()) return;
     uploadRevision.current++; setOpening(false); clearResults();
+    setMode("general"); setActiveDemoSampleId(null);
     if (blobRef.current) URL.revokeObjectURL(blobRef.current);
     blobRef.current = null;
     if (imageUrl !== "/objects-sample.jpg") setReady(false);
@@ -428,6 +502,7 @@ export default function Home() {
   function openBatchResult(item: BatchItem) {
     if (!item.run || !canReplace()) return;
     clearResults();
+    setMode("general"); setActiveDemoSampleId(null);
     if (blobRef.current) URL.revokeObjectURL(blobRef.current);
     blobRef.current = null;
     setReady(false); setImageUrl(item.url);
@@ -537,17 +612,37 @@ export default function Home() {
     <main className="studio">
       <header className="app-header">
         <div className="wordmark">Visual Inspection <span>Studio</span></div>
-        <div className="header-meta">Local vision · Approved spec rules · Structured reports <span className="version">v0.5</span></div>
-      </header>
-      <div className="page-heading">
-        <div><p className="breadcrumb">Workspace / {modeLabel[mode]}</p><h1>Inspect, review, export</h1><p className="heading-copy">Run a real detector, verify each region, and download an audit-ready report.</p></div>
-        <div className="heading-actions">
-          <label className="mode-picker"><span>Inspection mode</span><select aria-label="Inspection mode" value={mode} onChange={event => changeMode(event.target.value as WorkspaceMode)}><option value="general">General Object Detection</option><option value="surface-defect">Surface Defect Inspection</option></select></label>
-          <Button variant="outline" onClick={loadSample} disabled={opening}>Load sample</Button>
-          <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Upload image"}</Button>
-          <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={mode !== "general" || !ready || busy || opening}>{mode !== "general" ? "Model required" : busy ? phase : "Run detection"}</Button>
-          {busy && <Button variant="outline" onClick={() => { cancel(); setNotice("Detection cancelled. Previous results retained."); }}>Cancel</Button>}
+        <div className="header-meta">
+          <span className="header-capabilities">Local vision · Approved rules · Auditable reports</span>
+          {accessMode === "owner" ? <div className="access-switch" aria-label="Demo access mode">
+            <button className={workspaceAccess === "public" ? "active" : ""} onClick={() => setWorkspaceAccess("public")}>Public demo</button>
+            <button className={workspaceAccess === "owner" ? "active" : ""} onClick={() => setWorkspaceAccess("owner")}>Owner live</button>
+          </div> : <span className="access-badge"><LockKeyhole size={13} aria-hidden="true" /> {accessMode === "checking" ? "Checking access" : "Safe public demo"}</span>}
+          <span className="version">v0.6</span>
         </div>
+      </header>
+      <div className={`page-heading ${activeTab === "overview" ? "portfolio-heading" : ""}`}>
+        {activeTab === "overview" ? <>
+          <div className="portfolio-heading-copy"><p className="breadcrumb">INDUSTRIAL COMPUTER VISION / GOVERNED QA</p><h1>Turn quality requirements into auditable inspection decisions.</h1><p className="heading-copy">A quality PDF becomes approved logic. A detector finds defects. A deterministic engine explains every PASS, FAIL, or REVIEW decision.</p></div>
+          <div className="heading-actions portfolio-actions">
+            <Button onClick={startPublicDemo}>Start 30-second demo <ArrowRight size={15} aria-hidden="true" /></Button>
+            <a className="button-link secondary" href={PUBLIC_DEMO.spec.pdfPath} target="_blank" rel="noreferrer">View sample spec</a>
+          </div>
+        </> : <>
+          <div><p className="breadcrumb">Workspace / {activeDemoSample ? "Recorded PCB inspection" : modeLabel[mode]}</p><h1>{activeDemoSample ? activeDemoSample.title : "Inspect, review, export"}</h1><p className="heading-copy">{activeDemoSample ? `${activeDemoSample.clientSummary} Real validation prediction; no live API call.` : "Run a real detector, verify each region, and download an audit-ready report."}</p></div>
+          <div className="heading-actions">
+            {activeDemoSample ? <>
+              <Button variant="outline" onClick={() => setActiveTab("overview")}>All demo cases</Button>
+              <Button onClick={() => setActiveTab("decision")}>View decision trace</Button>
+            </> : <>
+              <label className="mode-picker"><span>Inspection mode</span><select aria-label="Inspection mode" value={mode} onChange={event => changeMode(event.target.value as WorkspaceMode)}><option value="general">General Object Detection</option><option value="surface-defect">Surface Defect Inspection</option></select></label>
+              <Button variant="outline" onClick={loadSample} disabled={opening}>Load sample</Button>
+              <Button variant="outline" onClick={() => inputRef.current?.click()} disabled={opening}>{opening ? "Opening image…" : "Upload image"}</Button>
+              <Button onClick={() => { if (canReplace()) void runDetection().catch(() => undefined); }} disabled={mode !== "general" || !ready || busy || opening}>{mode !== "general" ? "Model required" : busy ? phase : "Run detection"}</Button>
+              {busy && <Button variant="outline" onClick={() => { cancel(); setNotice("Detection cancelled. Previous results retained."); }}>Cancel</Button>}
+            </>}
+          </div>
+        </>}
         <input ref={inputRef} type="file" className="sr-only" aria-label="Choose inspection image" accept="image/png,image/jpeg,image/webp"
           onChange={event => { void chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
       </div>
@@ -555,12 +650,60 @@ export default function Home() {
       <div className="sr-only" role="status" aria-live="polite">{phase || notice}</div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="workspace-tabs">
         <div className="tab-bar">
-          <TabsList variant="line"><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="spec">Quality spec</TabsTrigger><TabsTrigger value="decision">Rules & decision</TabsTrigger><TabsTrigger value="evaluation">Model & performance</TabsTrigger></TabsList>
-          <span className="tab-description">{mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No results generated</>}</span>
+          <TabsList variant="line"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="review">Review</TabsTrigger><TabsTrigger value="batch">Batch</TabsTrigger><TabsTrigger value="spec">Quality spec</TabsTrigger><TabsTrigger value="decision">Rules & decision</TabsTrigger><TabsTrigger value="evaluation">Evidence</TabsTrigger></TabsList>
+          <span className="tab-description">{activeDemoSample ? <>{activeModel.name} <span className="divider">/</span> Internal validation <span className="divider">/</span> Recorded</> : ownerLive ? <>Owner mode <span className="divider">/</span> Live extraction enabled</> : mode === "general" ? <>{MODEL.name} <span className="divider">/</span> Browser inference <span className="divider">/</span> 80 classes</> : <>Domain model required <span className="divider">/</span> No fabricated results</>}</span>
         </div>
-        {mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured</strong><p>This workspace is ready for a trained defect model, but it will not invent scratches, dents, cracks, or rust results. Use General Object Detection for the working YOLOX demo.</p></div><a href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Review recommended model path</a></div>}
+        {activeDemoSample ? <div className="mode-banner recorded" role="status"><div><strong>Recorded specialized-detector evidence</strong><p>This is a real cached YOLOX-Nano PCB validation prediction. Review and export work normally; rerunning the specialized model is intentionally unavailable in the public browser demo.</p></div><span>0 LLM calls · frozen test untouched</span></div>
+          : mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured for arbitrary browser uploads</strong><p>Use the Overview for verified PCB validation cases, or connect a client-approved ONNX model for live product-specific inference.</p></div><button className="text-control" onClick={() => setActiveTab("overview")}>Open verified cases</button></div>}
+        <TabsContent value="overview" className="overview-workspace">
+          <section className="overview-proof">
+            <div className="proof-copy"><span className="eyebrow">SAFE PUBLIC WALKTHROUGH</span><h2>See the whole inspection decision—not just a bounding box.</h2><p>Follow one controlled path from a searchable PCB specification to reviewed rules, real detector findings, an operator decision, and a structured report.</p>
+              <div className="proof-actions"><Button onClick={candidateApproved ? () => openPublicSample(PUBLIC_DEMO.samples[2]) : startPublicDemo}>{candidateApproved ? "Open a critical defect" : "Start with the sample PDF"} <ArrowRight size={15} aria-hidden="true" /></Button><span><ShieldCheck size={15} aria-hidden="true" /> Public walkthrough makes zero paid calls</span></div>
+            </div>
+            <figure className="overview-visual">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={PUBLIC_DEMO.samples[2].annotatedPath} alt="PCB open-circuit defect localized by a bounding box" />
+              <figcaption><span>RULE DECISION</span><strong>FAIL</strong><small>critical · open circuit</small></figcaption>
+            </figure>
+          </section>
+          <section className="evidence-strip" aria-label="Demo evidence">
+            <div><strong>Real predictions</strong><span>Cached from the 851-image internal validation split</span></div>
+            <div><strong>Source-linked rules</strong><span>Every requirement cites a verified PDF page</span></div>
+            <div><strong>Human approval</strong><span>Generated candidates never activate automatically</span></div>
+            <div><strong>Auditable output</strong><span>Decision trace plus JSON and CSV reports</span></div>
+          </section>
+          <section className="how-section">
+            <div className="section-intro"><p className="breadcrumb">HOW IT WORKS</p><h2>From factory requirement to explainable disposition</h2><p>The LLM translates documents; it never replaces the detector or makes the final quality decision.</p></div>
+            <ol className="how-flow">
+              <li><span>01</span><FileText aria-hidden="true" /><strong>Read the spec</strong><p>Extract searchable, page-labelled PDF text.</p></li>
+              <li><span>02</span><ClipboardCheck aria-hidden="true" /><strong>Review the rules</strong><p>Validate strict JSON and approve cited requirements.</p></li>
+              <li><span>03</span><ScanLine aria-hidden="true" /><strong>Detect defects</strong><p>Locate PCB findings with a specialized vision model.</p></li>
+              <li><span>04</span><UserCheck aria-hidden="true" /><strong>Resolve uncertainty</strong><p>Accept, dismiss, annotate, or route to an operator.</p></li>
+              <li><span>05</span><FileDown aria-hidden="true" /><strong>Export evidence</strong><p>Save the outcome, boxes, timing, notes, and trace.</p></li>
+            </ol>
+          </section>
+          <section className="demo-cases">
+            <div className="section-intro"><p className="breadcrumb">VERIFIED PCB CASES</p><h2>One policy. Three operational outcomes.</h2><p>Each pair shows the original validation image and the real cached detector output. Approve the sample policy once, then inspect every case.</p></div>
+            <div className="case-grid">{PUBLIC_DEMO.samples.map(sample => <article className="case-card" key={sample.id}>
+              <div className="case-comparison">
+                <figure>
+                  <span>INPUT</span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={sample.imagePath} alt={`${sample.title} PCB input`} />
+                </figure>
+                <figure>
+                  <span>DETECTOR OUTPUT</span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={sample.annotatedPath} alt={`${sample.title} with detection box`} />
+                </figure>
+              </div>
+              <div className="case-body"><div><span className={`decision-badge ${sample.expectedOutcome.toLowerCase()}`}>{sample.expectedOutcome}</span><small>{sample.expectedSeverity} severity</small></div><h3>{sample.title}</h3><p>{sample.clientSummary}</p><button className="case-link" onClick={() => openPublicSample(sample)}>{candidateApproved ? "Open review workspace" : "Approve policy to inspect"} <ArrowRight size={14} aria-hidden="true" /></button></div>
+            </article>)}</div>
+            <p className="dataset-credit">Samples: <a href={PUBLIC_DEMO.dataset.source} target="_blank" rel="noreferrer">{PUBLIC_DEMO.dataset.name}</a>, {PUBLIC_DEMO.dataset.license}. Internal validation only; the frozen official validation/test partition was not accessed.</p>
+          </section>
+        </TabsContent>
         <TabsContent value="review">
-          {mode === "general" && inspectionDecision && <section className={`decision-strip ${inspectionDecision.outcome.toLowerCase()}`} aria-label="Inspection decision">
+          {inspectionInteractive && inspectionDecision && <section className={`decision-strip ${inspectionDecision.outcome.toLowerCase()}`} aria-label="Inspection decision">
             <div className="decision-mark"><span>RULE DECISION</span><strong>{inspectionDecision.outcome}</strong><small>{inspectionDecision.severity} severity</small></div>
             <div className="decision-copy"><strong>{inspectionDecision.policy.name}</strong><p>{inspectionDecision.summary}</p></div>
             <button className="text-control" onClick={() => setActiveTab("decision")}>View decision trace</button>
@@ -573,7 +716,7 @@ export default function Home() {
               </div>
               <div className={"image-viewport" + (dragging ? " drag-active" : "")}
                 onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
-                onDrop={event => { event.preventDefault(); setDragging(false); void chooseFile(event.dataTransfer.files[0]); }}>
+                onDrop={event => { event.preventDefault(); setDragging(false); if (!activeDemoSample) void chooseFile(event.dataTransfer.files[0]); }}>
                 <div className="image-plane" style={{ "--image-ratio": image.width && image.height ? image.width / image.height : 4 / 3 } as CSSProperties}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img ref={imageRef} src={imageUrl} alt={"Inspection image: " + image.name} draggable={false}
@@ -602,20 +745,20 @@ export default function Home() {
                   </tr>)}</tbody>
                 </table>
                 {!visible.length && <div className="table-empty">
-                  <strong>{mode === "surface-defect" ? "No defect model configured" : !run ? "Run detection to inspect this image" : !items.length ? "No objects detected" : "No detections match these filters"}</strong>
-                  <p>{mode === "surface-defect" ? "This mode will stay empty until a real model trained for the target product is exported and connected." : !run ? "Use the sample or open a PNG, JPEG or WebP. Maximum 20 MB." : !items.length ? "Try an image with people, vehicles, animals or household items." : "Lower the confidence threshold or reset the class and review filters."}</p>
-                  {mode === "surface-defect" && <button className="text-control" onClick={() => changeMode("general")}>Switch to general object detection</button>}
-                  {mode === "general" && run && !!items.length && <button className="text-control" onClick={() => { setThreshold(10); setHiddenClasses([]); setReviewFilter("all"); }}>Reset filters</button>}
+                  <strong>{mode === "surface-defect" && !activeDemoSample ? "No arbitrary-upload defect model configured" : !run ? "Run detection to inspect this image" : !items.length ? "No findings recorded" : "No findings match these filters"}</strong>
+                  <p>{mode === "surface-defect" && !activeDemoSample ? "Open one of the verified demo cases or connect a client-specific model." : !run ? "Use the sample or open a PNG, JPEG or WebP. Maximum 20 MB." : !items.length ? "No detector proposals survived the operating threshold." : "Lower the confidence threshold or reset the class and review filters."}</p>
+                  {mode === "surface-defect" && !activeDemoSample && <button className="text-control" onClick={() => setActiveTab("overview")}>Open verified demo cases</button>}
+                  {inspectionInteractive && run && !!items.length && <button className="text-control" onClick={() => { setThreshold(10); setHiddenClasses([]); setReviewFilter("all"); }}>Reset filters</button>}
                 </div>}
               </div>
             </section>
             <aside className="inspector" aria-label="Detection inspector">
               <div className="inspector-title"><h2>Inspector</h2><span>{selected ? "#" + String(selected.id).padStart(2, "0") : "No selection"}</span></div>
-              {mode === "surface-defect" && <section className="inspector-section model-status"><div className="status-kicker">SURFACE DEFECT MODEL</div><h3>Not configured</h3><p>Connect a model trained for this product and camera setup before reviewing defect findings.</p><dl className="properties"><div><dt>Recommended</dt><dd>Anomalib PatchCore / PaDiM</dd></div><div><dt>Input</dt><dd>Customer-approved normal images</dd></div><div><dt>Output</dt><dd>Anomaly map + review region</dd></div></dl><a className="text-control" href="https://github.com/open-edge-platform/anomalib" target="_blank" rel="noreferrer">Model documentation</a></section>}
-              {mode === "general" && (selected ? <section className="inspector-section">
+              {mode === "surface-defect" && !activeDemoSample && <section className="inspector-section model-status"><div className="status-kicker">SURFACE DEFECT MODEL</div><h3>Client model required</h3><p>Connect an approved model trained for this product and camera setup before processing arbitrary uploads.</p><dl className="properties"><div><dt>Demo evidence</dt><dd>Verified validation cases</dd></div><div><dt>Client input</dt><dd>Labelled product images</dd></div><div><dt>Integration</dt><dd>Detector adapter + ONNX</dd></div></dl><button className="text-control" onClick={() => setActiveTab("overview")}>Open demo cases</button></section>}
+              {inspectionInteractive && (selected ? <section className="inspector-section">
                 <div className="selected-heading"><h3>{selected.label}</h3><strong className="mono">{percent(selected.confidence)}</strong></div>
                 <div className="crop-view"><canvas ref={cropRef} width={640} height={320} aria-label={`Zoomed view of ${selected.label} detection ${selected.id}`} /><span>Region zoom · surrounding context included</span></div>
-                <dl className="properties"><div><dt>Source</dt><dd>{MODEL.name}</dd></div><div><dt>Position</dt><dd className="mono">{Math.round(selected.x)}, {Math.round(selected.y)} px</dd></div><div><dt>Dimensions</dt><dd className="mono">{Math.round(selected.width)} × {Math.round(selected.height)} px</dd></div></dl>
+                <dl className="properties"><div><dt>Source</dt><dd>{activeModel.name}</dd></div><div><dt>Position</dt><dd className="mono">{Math.round(selected.x)}, {Math.round(selected.y)} px</dd></div><div><dt>Dimensions</dt><dd className="mono">{Math.round(selected.width)} × {Math.round(selected.height)} px</dd></div></dl>
                 <label className="field-label" htmlFor="review-note">Review note</label>
                 <textarea id="review-note" placeholder="Record an observation…" value={selected.note} maxLength={1000} disabled={busy} onChange={event => updateItem(selected.id, { note: event.target.value })} />
                 <div className="review-actions">{(["accepted", "dismissed"] as Review[]).map(value => <Button key={value} variant={selected.review === value ? "default" : "outline"} aria-pressed={selected.review === value} disabled={busy} onClick={() => updateItem(selected.id, { review: value })}>{value === "accepted" ? "Accept finding" : "Reject finding"}</Button>)}</div>
@@ -624,17 +767,17 @@ export default function Home() {
               <section className="inspector-section filters">
                 <div className="section-label"><h3>Display filters</h3><button className="text-control" onClick={() => { setThreshold(30); setHiddenClasses([]); setReviewFilter("all"); }}>Reset</button></div>
                 <label className="range-label" htmlFor="confidence">Minimum confidence <output>{threshold}%</output></label>
-                <input id="confidence" aria-label="Minimum confidence" type="range" min={10} max={95} step={1} value={threshold} disabled={mode !== "general"} onChange={event => setThreshold(Number(event.target.value))} />
+                <input id="confidence" aria-label="Minimum confidence" type="range" min={10} max={95} step={1} value={threshold} disabled={!inspectionInteractive} onChange={event => setThreshold(Number(event.target.value))} />
                 <div className="range-ends"><span>10%</span><span>95%</span></div>
                 <label className="field-label" htmlFor="review-filter">Review status</label>
-                <select id="review-filter" disabled={mode !== "general"} value={reviewFilter} onChange={event => setReviewFilter(event.target.value)}><option value="all">All detections</option><option value="pending">Unreviewed</option><option value="accepted">Accepted</option><option value="dismissed">Dismissed</option></select>
-                {classes.length > 0 && <fieldset className="class-filter"><legend>Object classes</legend>{classes.map(label => <label key={label}><input type="checkbox" disabled={mode !== "general"} checked={!hiddenClasses.includes(label)} onChange={event => setHiddenClasses(current => event.target.checked ? current.filter(item => item !== label) : [...current, label])} /><span>{label}</span><span className="class-count">{items.filter(item => item.label === label).length}</span></label>)}</fieldset>}
+                <select id="review-filter" disabled={!inspectionInteractive} value={reviewFilter} onChange={event => setReviewFilter(event.target.value)}><option value="all">All detections</option><option value="pending">Unreviewed</option><option value="accepted">Accepted</option><option value="dismissed">Dismissed</option></select>
+                {classes.length > 0 && <fieldset className="class-filter"><legend>Finding classes</legend>{classes.map(label => <label key={label}><input type="checkbox" disabled={!inspectionInteractive} checked={!hiddenClasses.includes(label)} onChange={event => setHiddenClasses(current => event.target.checked ? current.filter(item => item !== label) : [...current, label])} /><span>{label}</span><span className="class-count">{items.filter(item => item.label === label).length}</span></label>)}</fieldset>}
               </section>
               <section className="inspector-section export-section">
                 <h3>Export results</h3>
                 <label htmlFor="export-scope" className="sr-only">Export scope</label>
-                <select id="export-scope" disabled={mode !== "general"} value={scope} onChange={event => setScope(event.target.value)}><option value="all">All detections ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
-                <div className="review-actions"><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("json")}>Download JSON</Button><Button variant="outline" disabled={mode !== "general" || !run || busy} onClick={() => exportResults("csv")}>Download CSV</Button></div>
+                <select id="export-scope" disabled={!inspectionInteractive} value={scope} onChange={event => setScope(event.target.value)}><option value="all">All findings ({items.length})</option><option value="visible">Filtered view ({visible.length})</option></select>
+                <div className="review-actions"><Button variant="outline" disabled={!inspectionInteractive || !run || busy} onClick={() => exportResults("json")}>Download JSON</Button><Button variant="outline" disabled={!inspectionInteractive || !run || busy} onClick={() => exportResults("csv")}>Download CSV</Button></div>
                 <p className="export-note">{notice || (dirty ? "Review changes have not been exported." : "Includes coordinates, review state, rule outcome, severity, and the full decision trace.")}</p>
               </section>
             </aside>
@@ -669,17 +812,18 @@ export default function Home() {
         </TabsContent>
         <TabsContent value="spec" className="spec-workspace">
           <div className="spec-heading">
-            <div><p className="breadcrumb">Specification intake</p><h2>Turn a quality PDF into reviewable rules</h2><p>Upload a searchable PDF. Its text is extracted in the browser, the configured LLM proposes structured rules, AJV validates them, and a person must approve the candidate before it can affect inspection decisions.</p></div>
+            <div><p className="breadcrumb">Specification intake</p><h2>Turn a quality PDF into reviewable rules</h2><p>{ownerLive ? "Upload a searchable PDF for live structured extraction. AJV validates the result, source evidence is checked, and a person must approve the candidate before it can affect inspection decisions." : "The safe public walkthrough parses a real searchable PDF and replays a recorded rule candidate. Validation and explicit human approval still run normally, with no paid model call."}</p></div>
             <div className="spec-actions">
               <input ref={specInputRef} type="file" className="sr-only" aria-label="Choose quality specification PDF" accept="application/pdf,.pdf"
                 onChange={event => { void extractSpecRules(event.target.files?.[0]); event.target.value = ""; }} />
-              <Button variant="outline" onClick={() => void loadExampleSpec()} disabled={specBusy}>{specBusy ? specStatus : "Run example PDF"}</Button>
-              <Button onClick={() => specInputRef.current?.click()} disabled={specBusy}>{specBusy ? "Processing…" : "Upload quality PDF"}</Button>
+              <a className="button-link secondary" href={PUBLIC_DEMO.spec.pdfPath} target="_blank" rel="noreferrer">View PDF</a>
+              <Button onClick={() => void loadExampleSpec()} disabled={specBusy}>{specBusy ? specStatus : ownerLive ? "Run example live" : "Load zero-cost example"}</Button>
+              {ownerLive && <Button variant="outline" onClick={() => specInputRef.current?.click()} disabled={specBusy}>{specBusy ? "Processing…" : "Upload quality PDF"}</Button>}
             </div>
           </div>
           <div className="spec-flow" aria-label="Specification processing steps">
             <div className={specDocument ? "complete" : "active"}><span>01</span><strong>Read PDF</strong><small>Searchable text only</small></div>
-            <div className={ruleCandidate ? "complete" : specDocument ? "active" : ""}><span>02</span><strong>Extract rules</strong><small>Strict model JSON</small></div>
+            <div className={ruleCandidate ? "complete" : specDocument ? "active" : ""}><span>02</span><strong>Extract rules</strong><small>{ownerLive ? "Strict model JSON" : "Recorded candidate"}</small></div>
             <div className={ruleCandidate ? "complete" : ""}><span>03</span><strong>Validate</strong><small>Schema + evidence</small></div>
             <div className={candidateApproved ? "complete" : ruleCandidate ? "active" : ""}><span>04</span><strong>Human approval</strong><small>Never automatic</small></div>
           </div>
@@ -690,14 +834,14 @@ export default function Home() {
               <div className="panel-heading"><div><span>SOURCE DOCUMENT</span><h3>{specDocument?.fileName ?? "No PDF loaded"}</h3></div>{specDocument && <span>{specDocument.pages.length} page{specDocument.pages.length === 1 ? "" : "s"}</span>}</div>
               {specDocument ? <>
                 <dl className="properties spec-properties"><div><dt>Document fingerprint</dt><dd title={specDocument.documentId}>{specDocument.documentId.slice(0, 18)}…</dd></div><div><dt>Selectable text</dt><dd>{number(specDocument.pages.reduce((total, page) => total + page.text.length, 0))} characters</dd></div><div><dt>Detector vocabulary</dt><dd>{specDocument.supportedClasses.length} labels supplied</dd></div></dl>
-                <p className="spec-privacy">The PDF is parsed locally. Only extracted, page-labelled text is sent through this application&apos;s server to the configured OpenAI model. Images are not sent with the specification.</p>
+                <p className="spec-privacy">{ownerLive ? "The PDF is parsed locally. Only extracted, page-labelled text is sent through this application's protected server route to the configured OpenAI model. Images are not sent with the specification." : "The PDF is parsed and fingerprinted in this browser. The recorded candidate is checked against its page evidence; neither document text nor images are sent to a paid service."}</p>
               </> : <div className="spec-empty"><strong>Searchable PDFs only</strong><p>Scanned-image PDFs, password-protected files, and documents over 25 pages are rejected in this first version.</p></div>}
             </section>
             <section className="spec-candidate-panel">
               <div className="panel-heading"><div><span>RULE CANDIDATE</span><h3>{ruleCandidate?.candidate.name ?? "Waiting for extraction"}</h3></div>{ruleCandidate && <span>{ruleCandidate.candidate.rules.length} rules</span>}</div>
               {ruleCandidate ? <>
                 <div className="validation-row"><span className="validation-badge valid">AJV contract valid</span><span className="validation-badge valid">Evidence verified</span><span className={`validation-badge ${candidateApproved ? "active" : "pending"}`}>{candidateApproved ? "Approved and active" : "Approval required"}</span></div>
-                <dl className="properties spec-properties"><div><dt>Model</dt><dd>{ruleCandidate.provider.model}</dd></div><div><dt>Extraction latency</dt><dd>{number(ruleCandidate.provider.latencyMs)} ms</dd></div><div><dt>Token usage</dt><dd>{ruleCandidate.provider.usage.totalTokens ?? "Not reported"}</dd></div></dl>
+                <dl className="properties spec-properties"><div><dt>Extraction</dt><dd>{ruleCandidate.provider.model === "recorded-example" ? "Recorded example" : ruleCandidate.provider.model}</dd></div><div><dt>API latency</dt><dd>{ruleCandidate.provider.model === "recorded-example" ? "Not called" : `${number(ruleCandidate.provider.latencyMs)} ms`}</dd></div><div><dt>Paid usage</dt><dd>{ruleCandidate.provider.model === "recorded-example" ? "0 calls" : ruleCandidate.provider.usage.totalTokens ?? "Not reported"}</dd></div></dl>
               </> : <div className="spec-empty"><strong>No generated policy is active</strong><p>Loading or uploading a PDF creates a candidate only. The current hand-written policy remains unchanged until approval.</p></div>}
             </section>
           </div>
@@ -714,7 +858,7 @@ export default function Home() {
               <div>
                 <Button variant="outline" onClick={() => downloadFile(JSON.stringify(ruleCandidate.candidate, null, 2), `${ruleCandidate.candidate.id}.json`, "application/json")}>Download candidate JSON</Button>
                 {!candidateApproved && <Button variant="outline" onClick={() => { setRuleCandidate(null); setSpecDocument(null); setSpecError(""); }}>Discard candidate</Button>}
-                {candidateApproved ? <Button variant="outline" onClick={restoreDefaultPolicy}>Restore default policy</Button> : <Button onClick={approveCandidate}>Approve &amp; activate policy</Button>}
+                {candidateApproved ? <><Button variant="outline" onClick={restoreDefaultPolicy}>Restore default policy</Button><Button onClick={() => setActiveTab("overview")}>Open inspection cases <ArrowRight size={15} aria-hidden="true" /></Button></> : <Button onClick={approveCandidate}>Approve &amp; activate policy</Button>}
               </div>
             </div>
           </section>}
@@ -736,23 +880,23 @@ export default function Home() {
         <TabsContent value="evaluation" className="evaluation">
           <div className="evaluation-heading"><p className="breadcrumb">Operational evidence</p><h2>Model & performance</h2><p>Live runtime statistics are separated from validation metrics so a client can see what is measured and what is not.</p></div>
           <div className="evaluation-grid"><section><h3>Current browser run</h3><dl className="properties">
-            <div><dt>Model</dt><dd>{mode === "general" ? MODEL.name + " / " + MODEL.version : "Not configured"}</dd></div>
-            <div><dt>Input resolution</dt><dd>416 × 416</dd></div>
-            <div><dt>Inference</dt><dd>{mode === "general" && run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
-            <div><dt>Total processing</dt><dd>{mode === "general" && run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
-            <div><dt>Completed</dt><dd>{mode === "general" && run ? new Date(run.completedAt).toLocaleString() : "Not run"}</dd></div>
-            <div><dt>Review decisions</dt><dd>{mode === "general" ? accepted + " accepted / " + dismissed + " dismissed" : "Not available"}</dd></div>
-            <div><dt>Rule decision</dt><dd>{mode === "general" && inspectionDecision ? inspectionDecision.outcome + " / " + inspectionDecision.severity : "Not run"}</dd></div>
-          </dl><p className="secondary-copy">Total processing includes model loading on the first run. Images remain local to this device.</p></section>
+            <div><dt>Model</dt><dd>{inspectionInteractive ? activeModel.name + " / " + activeModel.version : "Not configured"}</dd></div>
+            <div><dt>Input resolution</dt><dd>{activeModel.inputSize} × {activeModel.inputSize}</dd></div>
+            <div><dt>Inference</dt><dd>{run ? number(run.inferenceMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Total processing</dt><dd>{run ? number(run.totalMs) + " ms" : "Not run"}</dd></div>
+            <div><dt>Run source</dt><dd>{run?.executionProvider ?? "Browser WASM"}</dd></div>
+            <div><dt>Review decisions</dt><dd>{inspectionInteractive ? accepted + " accepted / " + dismissed + " dismissed" : "Not available"}</dd></div>
+            <div><dt>Rule decision</dt><dd>{inspectionDecision ? inspectionDecision.outcome + " / " + inspectionDecision.severity : "Not run"}</dd></div>
+          </dl><p className="secondary-copy">Recorded PCB cases preserve measured validation output; live general-object images run locally in browser WASM.</p></section>
           <section><h3>PCB detector validation</h3><div className="metric-grid"><div><span>Precision</span><strong>69.9%</strong></div><div><span>Recall</span><strong>66.2%</strong></div><div><span>F1</span><strong>68.0%</strong></div><div><span>mAP@0.5</span><strong>69.4%</strong></div></div>
             <p className="secondary-copy">YOLOX-Nano trained on 7,357 DsPCBSD+ training images and measured on 851 validation images. The frozen test split remains sealed.</p>
             <h3 className="model-scope-title">Precision-first profile</h3><p>Class-specific thresholds raise validation precision to 77.0% and F1 to 70.2%, with recall at 64.5%. This profile is available for stricter QA triage; it is not applied to the general COCO demo above.</p>
           </section>
           <section><h3>Client model integration</h3><p>The review console is intentionally separated from the detector. A client-specific ONNX detector can replace the model while keeping upload, boxes, zoom, confidence controls, review decisions, batch processing, and exports.</p><a className="text-control" href="https://github.com/ibrohimgets/visual-inspection-studio#adapt-it-to-a-client-dataset" target="_blank" rel="noreferrer">See the detector integration workflow</a></section>
-          <section><h3>Known limits</h3><p>The hosted model recognizes 80 everyday COCO categories, not PCB defects. The trained PCB checkpoint is evaluated offline and is not presented as browser inference until its export is verified. Prior Terra routing is retained as a negative baseline and adds no accuracy claim.</p><a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX model documentation</a></section></div>
+          <section><h3>Known limits</h3><p>Arbitrary browser uploads use the 80-class COCO model and are not relabelled as PCB defects. The PCB walkthrough uses disclosed cached validation predictions until the specialized checkpoint is exported and verified for browser inference. Prior Terra routing remains a negative baseline and adds no accuracy claim.</p><a className="text-control" href={MODEL.source} target="_blank" rel="noreferrer">YOLOX model documentation</a></section></div>
         </TabsContent>
       </Tabs>
-      <footer className="app-footer"><span>Image inference stays on-device. PDF text is sent to the configured LLM only when you request rule extraction.</span><span>YOLOX-Nano · PDF.js · AJV</span></footer>
+      <footer className="app-footer"><span>Public walkthrough: recorded extraction, zero paid calls. Owner mode: live PDF text extraction through a protected server route.</span><span>YOLOX-Nano · PDF.js · AJV · deterministic rules</span></footer>
     </main>
   );
 }

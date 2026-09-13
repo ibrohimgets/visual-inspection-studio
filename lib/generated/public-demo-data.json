@@ -1,0 +1,298 @@
+{
+  "schemaVersion": 1,
+  "kind": "safe-public-demo",
+  "generatedAt": "2026-09-13T00:00:00.000Z",
+  "spec": {
+    "pdfPath": "/examples/factory-quality-spec-example.pdf",
+    "document": {
+      "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+      "fileName": "factory-quality-spec-example.pdf",
+      "pages": [
+        {
+          "page": 1,
+          "text": "NORTHSTAR ELECTRONICS CONTROLLED QUALITY DOCUMENT\nQSP-PCB-017 | Revision 1.0 | Portfolio demonstration Page 1\nPCB Camera Inspection\nAcceptance Specification\nExample requirements for detector findings, deterministic disposition, and human review\nDocument QSP-PCB-017 Revision 1.0\nOwner Quality Engineering Effective 13 September 2026\nApplies to PCB optical inspection cell Status Example / not production\n1. Purpose and decision authority\nThis example defines image-level acceptance logic for a PCB optical inspection cell. The detector supplies candidate regions\nand confidence scores. The approved deterministic policy supplies the final PASS, FAIL, or HUMAN REVIEW disposition.\n1.1. Approval gate\nRules extracted from this document are draft candidates only. A quality engineer must verify the cited source\nevidence and explicitly approve the complete policy before it can control an inspection.\n2. Defect-class requirements\n2.1. Critical circuit defects\nAny open-circuit (OP) or short-circuit (SH) finding is critical and must result in FAIL.\n2.2. Conductor scratches\nA conductor-scratch (CS) finding requires HUMAN REVIEW before disposition.\n2.3. Cosmetic spur allowance\nA spur (SP) finding is acceptable for this demonstration and may PASS when no higher-priority rule applies.\n2.4. Maximum finding count\nMore than two actionable PCB defect findings in one image must result in FAIL.\nThis document is a portfolio example, not a factory acceptance standard. A client must replace these limits\nwith validated production requirements."
+        },
+        {
+          "page": 2,
+          "text": "NORTHSTAR ELECTRONICS CONTROLLED QUALITY DOCUMENT\nQSP-PCB-017 | Revision 1.0 | Portfolio demonstration Page 2\nConfidence and capability controls\nUncertain or unsupported requirements fail safely to human review\n3. Detector confidence\n3.1. Unconfirmed findings\nFindings below 30 percent confidence may be ignored. Findings from 30 percent up to but below 70 percent\nconfidence require HUMAN REVIEW.\n4. Scope boundary\nCalibrated length measurements and missing-component checks are outside this example policy. A client deployment must add\ncamera calibration, a reference assembly, and validated detector capabilities before those requirements can be automated. Any\nfuture requirement that the active detector or rule engine cannot evaluate must produce HUMAN REVIEW rather than an\nautomatic PASS or FAIL.\nDisposition Meaning Required action\nPASS No fail or review rule triggered Release under approved process\nFAIL One or more fail rules triggered Reject and record decisive evidence\nHUMAN REVIEW Uncertain or unsupported requirement Quality engineer resolves disposition\nApproval record\nQuality engineer ____________________________\nApproval date ____________________________\nApproved policy version ____________________________"
+        }
+      ],
+      "supportedClasses": [
+        "SH",
+        "SP",
+        "SC",
+        "OP",
+        "MB",
+        "HB",
+        "CS",
+        "CFO",
+        "BMFO"
+      ]
+    },
+    "extraction": {
+      "candidate": {
+        "schemaVersion": 1,
+        "id": "pcb-camera-acceptance-demo",
+        "name": "PCB camera acceptance policy",
+        "version": "candidate-1.0",
+        "description": "Evidence-linked rule candidate recorded for the zero-cost public portfolio walkthrough.",
+        "defaultOutcome": "PASS",
+        "defaultSeverity": "none",
+        "rules": [
+          {
+            "id": "pcb-confidence-review",
+            "type": "confidence-review",
+            "description": "Ignore weak proposals and route uncertain findings to human review.",
+            "severity": "major",
+            "source": {
+              "kind": "document",
+              "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+              "page": 2,
+              "evidence": "Findings below 30 percent confidence may be ignored. Findings from 30 percent up to but below 70 percent confidence require HUMAN REVIEW."
+            },
+            "ignoreBelow": 0.3,
+            "reviewBelow": 0.7
+          },
+          {
+            "id": "critical-circuit-defects",
+            "type": "defect-class",
+            "description": "Open- and short-circuit findings are critical rejects.",
+            "severity": "critical",
+            "source": {
+              "kind": "document",
+              "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+              "page": 1,
+              "evidence": "Any open-circuit (OP) or short-circuit (SH) finding is critical and must result in FAIL."
+            },
+            "classes": [
+              "OP",
+              "SH"
+            ],
+            "outcome": "FAIL"
+          },
+          {
+            "id": "conductor-scratch-review",
+            "type": "defect-class",
+            "description": "Conductor scratches require a quality engineer.",
+            "severity": "major",
+            "source": {
+              "kind": "document",
+              "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+              "page": 1,
+              "evidence": "A conductor-scratch (CS) finding requires HUMAN REVIEW before disposition."
+            },
+            "classes": [
+              "CS"
+            ],
+            "outcome": "REVIEW"
+          },
+          {
+            "id": "cosmetic-spur-allowance",
+            "type": "defect-class",
+            "description": "A cosmetic spur may pass when no higher-priority rule applies.",
+            "severity": "minor",
+            "source": {
+              "kind": "document",
+              "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+              "page": 1,
+              "evidence": "A spur (SP) finding is acceptable for this demonstration and may PASS when no higher-priority rule applies."
+            },
+            "classes": [
+              "SP"
+            ],
+            "outcome": "PASS"
+          },
+          {
+            "id": "maximum-actionable-findings",
+            "type": "maximum-defect-count",
+            "description": "More than two actionable findings reject the image.",
+            "severity": "major",
+            "source": {
+              "kind": "document",
+              "documentId": "sha256:ae180cb90de642393856929454444b81d6bfc46e3e96fce096b1f90bff5a3eb0",
+              "page": 1,
+              "evidence": "More than two actionable PCB defect findings in one image must result in FAIL."
+            },
+            "maximumAllowed": 2,
+            "outcome": "FAIL"
+          }
+        ]
+      },
+      "validation": {
+        "schemaValid": true,
+        "evidenceValid": true,
+        "issues": []
+      },
+      "provider": {
+        "model": "recorded-example",
+        "responseId": null,
+        "latencyMs": 0,
+        "usage": {
+          "inputTokens": null,
+          "outputTokens": null,
+          "totalTokens": null
+        }
+      }
+    }
+  },
+  "samples": [
+    {
+      "id": "pass-spur",
+      "imageId": "train2017:0067993.jpg",
+      "title": "Cosmetic spur",
+      "clientSummary": "Accepted by the approved demonstration policy.",
+      "imagePath": "/examples/pcb-demo/images/pass-spur.jpg",
+      "annotatedPath": "/examples/pcb-demo/images/pass-spur-annotated.png",
+      "width": 226,
+      "height": 226,
+      "expectedOutcome": "PASS",
+      "expectedSeverity": "minor",
+      "classNames": [
+        "Spur"
+      ],
+      "run": {
+        "detections": [
+          {
+            "id": 1,
+            "label": "SP",
+            "confidence": 0.7423625783611776,
+            "x": 108.47801738977432,
+            "y": 105.00281876325607,
+            "width": 13.792564570903778,
+            "height": 24.713503181934357,
+            "review": "pending",
+            "note": ""
+          }
+        ],
+        "inferenceMs": 9.35620000018389,
+        "totalMs": 9,
+        "completedAt": "2026-09-12T00:00:00.000Z",
+        "executionProvider": "cached validation inference",
+        "model": {
+          "name": "YOLOX-Nano PCB",
+          "version": "checkpoint epoch 5",
+          "inputSize": 256,
+          "source": "https://figshare.com/articles/dataset/DsPCBSD_/24970329",
+          "license": "YOLOX Apache-2.0; sample data CC BY 4.0"
+        }
+      },
+      "provenance": {
+        "datasetSplit": "validation",
+        "datasetFile": "train2017/0067993.jpg",
+        "model": "YOLOX-Nano PCB",
+        "checkpointEpoch": 5,
+        "thresholdProfile": "class-specific validation thresholds"
+      }
+    },
+    {
+      "id": "review-scratch",
+      "imageId": "train2017:0063146.jpg",
+      "title": "Conductor scratch",
+      "clientSummary": "Routed to a quality engineer before disposition.",
+      "imagePath": "/examples/pcb-demo/images/review-scratch.jpg",
+      "annotatedPath": "/examples/pcb-demo/images/review-scratch-annotated.png",
+      "width": 226,
+      "height": 226,
+      "expectedOutcome": "REVIEW",
+      "expectedSeverity": "major",
+      "classNames": [
+        "Conductor scratch"
+      ],
+      "run": {
+        "detections": [
+          {
+            "id": 1,
+            "label": "CS",
+            "confidence": 0.7460499676962229,
+            "x": 31.902431964874268,
+            "y": 1.7114797234535217,
+            "width": 113.76796174049377,
+            "height": 220.280382335186,
+            "review": "pending",
+            "note": ""
+          }
+        ],
+        "inferenceMs": 9.35620000018389,
+        "totalMs": 9,
+        "completedAt": "2026-09-12T00:00:00.000Z",
+        "executionProvider": "cached validation inference",
+        "model": {
+          "name": "YOLOX-Nano PCB",
+          "version": "checkpoint epoch 5",
+          "inputSize": 256,
+          "source": "https://figshare.com/articles/dataset/DsPCBSD_/24970329",
+          "license": "YOLOX Apache-2.0; sample data CC BY 4.0"
+        }
+      },
+      "provenance": {
+        "datasetSplit": "validation",
+        "datasetFile": "train2017/0063146.jpg",
+        "model": "YOLOX-Nano PCB",
+        "checkpointEpoch": 5,
+        "thresholdProfile": "class-specific validation thresholds"
+      }
+    },
+    {
+      "id": "fail-open-circuit",
+      "imageId": "train2017:0107466.jpg",
+      "title": "Open circuit",
+      "clientSummary": "Rejected as a critical circuit defect.",
+      "imagePath": "/examples/pcb-demo/images/fail-open-circuit.jpg",
+      "annotatedPath": "/examples/pcb-demo/images/fail-open-circuit-annotated.png",
+      "width": 226,
+      "height": 226,
+      "expectedOutcome": "FAIL",
+      "expectedSeverity": "critical",
+      "classNames": [
+        "Open circuit"
+      ],
+      "run": {
+        "detections": [
+          {
+            "id": 1,
+            "label": "OP",
+            "confidence": 0.788861369181177,
+            "x": 101.66692012548447,
+            "y": 96.96679490804672,
+            "width": 12.791372001171112,
+            "height": 21.942563593387604,
+            "review": "pending",
+            "note": ""
+          }
+        ],
+        "inferenceMs": 9.689921873359708,
+        "totalMs": 10,
+        "completedAt": "2026-09-12T00:00:00.000Z",
+        "executionProvider": "cached validation inference",
+        "model": {
+          "name": "YOLOX-Nano PCB",
+          "version": "checkpoint epoch 5",
+          "inputSize": 256,
+          "source": "https://figshare.com/articles/dataset/DsPCBSD_/24970329",
+          "license": "YOLOX Apache-2.0; sample data CC BY 4.0"
+        }
+      },
+      "provenance": {
+        "datasetSplit": "validation",
+        "datasetFile": "train2017/0107466.jpg",
+        "model": "YOLOX-Nano PCB",
+        "checkpointEpoch": 5,
+        "thresholdProfile": "class-specific validation thresholds"
+      }
+    }
+  ],
+  "safety": {
+    "paidLlmCalls": 0,
+    "extractionMode": "recorded",
+    "publicUploadsEnabled": false,
+    "frozenTestSplitAccessed": false
+  },
+  "dataset": {
+    "name": "DsPCBSD+",
+    "source": "https://figshare.com/articles/dataset/DsPCBSD_/24970329",
+    "doi": "10.6084/m9.figshare.24970329.v1",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": "DsPCBSD+ by Shengping Lv, used under CC BY 4.0."
+  }
+}

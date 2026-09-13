@@ -19,6 +19,8 @@ export const MODEL = {
 export const CLASSES = YOLOX_CLASSES;
 export type Run = {
   detections: Detection[]; inferenceMs: number; totalMs: number; completedAt: string;
+  executionProvider?: string;
+  model?: { name: string; version: string; inputSize: number; source: string; license: string };
 };
 export type ImageInfo = { name: string; width: number; height: number; source: "sample" | "upload" };
 
@@ -46,8 +48,8 @@ export function rgbaToBgr(data: Uint8ClampedArray) {
 export function createReport(image: ImageInfo, run: Run, items: Detection[], filters: object, scope: string,
   mode = "general-object", inspectionDecision: InspectionDecision | null = null) {
   return { schemaVersion: 2, exportedAt: new Date().toISOString(), image, mode,
-    model: MODEL, run: { completedAt: run.completedAt, inferenceMs: run.inferenceMs,
-      totalMs: run.totalMs, executionProvider: "wasm", candidateFloor: MIN_SCORE, nmsIou: 0.45 },
+    model: run.model ?? MODEL, run: { completedAt: run.completedAt, inferenceMs: run.inferenceMs,
+      totalMs: run.totalMs, executionProvider: run.executionProvider ?? "wasm", candidateFloor: MIN_SCORE, nmsIou: 0.45 },
     scope, filters, coordinateSystem: "original-image-pixels-xywh", inspectionDecision,
     detections: items.map(item => ({ ...item, confidence: Number(item.confidence.toFixed(6)),
       x: Number(item.x.toFixed(2)), y: Number(item.y.toFixed(2)),

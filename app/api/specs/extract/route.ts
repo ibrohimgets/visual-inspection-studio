@@ -1,4 +1,5 @@
 import { DEFAULT_RULE_EXTRACTION_MODEL, extractRulesWithOpenAI, SpecExtractionError } from "@/lib/spec-extraction";
+import { hasOwnerAccess } from "@/lib/owner-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,12 @@ function json(body: unknown, status = 200) {
 }
 
 export async function POST(request: Request) {
+  if (!hasOwnerAccess(request)) {
+    return json({ error: {
+      code: "OWNER_ACCESS_REQUIRED",
+      message: "Live rule extraction is available only in owner mode. The public walkthrough uses a recorded, zero-cost candidate.",
+    } }, 403);
+  }
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
     return json({ error: { code: "REQUEST_TOO_LARGE", message: "The extracted PDF text request is too large." } }, 413);

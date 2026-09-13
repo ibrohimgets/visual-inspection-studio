@@ -1,251 +1,185 @@
 # Visual Inspection Studio
 
-Visual Inspection Studio is a governed computer-vision inspection console. It
-turns a searchable quality-spec PDF into evidence-linked rule candidates, keeps
-those candidates behind a human approval gate, then applies the approved policy
-to real detector findings with a deterministic `PASS`, `FAIL`, or `REVIEW`
-trace.
+![Visual Inspection Studio public demo](docs/portfolio/cover.png)
 
-**[Open the hosted demo](https://visual-inspection-studio.iibrohimm.chatgpt.site/)**
+**Quality-spec PDF → approved inspection rules → defect detection → PASS / FAIL / REVIEW → audit-ready report**
 
-The demo performs YOLOX-Nano inference locally in the browser. Images are not
-sent to an inference API. PDF text is extracted locally and sent to the
-configured OpenAI model only when the user requests rule extraction. The LLM
-never makes the final image decision and generated rules never activate
-automatically.
+[Open the public demo](https://visual-inspection-studio.iibrohimm.chatgpt.site/) · [See the architecture](#engineering-architecture) · [Review measured results](#measured-detector-evidence)
 
-## Try the complete workflow in under 30 seconds
+Visual Inspection Studio is a governed computer-vision inspection product. It turns written quality requirements into evidence-linked rule candidates, keeps them behind a human approval gate, applies the approved policy to detector findings, and explains every decision.
 
-1. Select **Load sample**, then **Run detection**.
-2. Select a box, inspect the crop, accept or reject the finding, and add a note.
-3. Open **Rules & decision** to see the exact policy trace behind the result.
-4. Open **Quality spec** and choose **Run example PDF**.
-5. Verify every candidate rule against its page and source evidence.
-6. Select **Approve & activate policy**; until then, the current policy stays in
-   force. Use **Restore default** to reverse the change.
-7. Download the JSON/CSV report or open **Batch** for a multi-image queue.
+It is built for the part clients need after model training: reliable intake, visible defect regions, operator review, deterministic decisions, batch handling, and structured reports.
 
-## What the product demonstrates
+## Understand it in 30 seconds
 
-| Capability | Implementation |
+1. Select **Start 30-second demo**.
+2. Open the real two-page PCB quality specification.
+3. Review five extracted rules and their exact page evidence.
+4. Select **Approve & activate policy**. Nothing activates before this action.
+5. Open the PASS, REVIEW, or FAIL PCB case.
+6. Inspect the defect box and zoom, add a review note, then open the decision trace or download JSON/CSV.
+
+The public walkthrough is safe by design: it uses a recorded, schema-valid extraction and three cached internal-validation predictions, so anonymous visitors make **zero paid LLM calls**. Owner mode keeps live quality-PDF extraction available through a server-side identity check.
+
+## What a client gets
+
+| Client need | Product capability |
 | --- | --- |
-| Real inference | Official YOLOX-Nano ONNX model, ONNX Runtime Web, no mocked boxes |
-| Clear localization | Selectable boxes, labels, confidence, pixel coordinates, and region zoom |
-| Human review | Accept, reject, reset, notes, and unsaved-change protection |
-| Runtime contract | `rule-schema.v1.json` is compiled by AJV and enforced before a policy reaches the engine |
-| Governed LLM intake | Searchable PDF text → strict JSON → schema validation → source-evidence verification → human approval |
-| Deterministic decisions | Approved rules produce PASS, FAIL, or REVIEW with fixed precedence and an ordered decision trace |
-| Batch inspection | Up to 12 local images per browser queue with per-image status and latency |
-| Inspection reports | Safe JSON and CSV export with model provenance, timings, coordinates, review state, rule outcome, and trace |
-| Operational visibility | Model version, execution provider, inference time, total time, and review counts |
-| Client adaptation | Reproducible train/validation pipeline and a documented ONNX integration boundary |
+| “Use our written acceptance criteria” | Searchable PDF intake, strict structured extraction, page evidence, and explicit approval |
+| “Show me exactly where the defect is” | Selectable boxes, class, confidence, original-pixel coordinates, and region zoom |
+| “Do not auto-reject uncertain parts” | Confidence bands, REVIEW routing, accept/dismiss controls, and operator notes |
+| “Make decisions consistently” | Versioned rule schema and deterministic `FAIL > REVIEW > PASS` precedence |
+| “Process more than one image” | Local batch queue with per-image status, findings, decisions, and latency |
+| “Give QA an audit trail” | JSON/CSV reports with model provenance, timings, corrections, outcome, and ordered reasoning trace |
+| “Use our own model and defect classes” | Model-agnostic detector adapter and documented ONNX integration boundary |
 
-```mermaid
-flowchart LR
-  P[Searchable quality PDF] --> X[Local PDF.js text extraction]
-  X --> L[LLM strict rule candidate]
-  L --> V[AJV + page evidence validation]
-  V --> A{Human approves?}
-  A -- No --> Q[Candidate only]
-  A -- Yes --> R[Active deterministic policy]
-  I[Image or batch] --> D[Detector adapter]
-  D --> F[Boxes + confidence]
-  F --> U[Review / correction]
-  F --> E[Rule engine]
-  U --> E
-  R --> E
-  E --> O[PASS / FAIL / REVIEW + trace]
-  O --> Z[JSON / CSV report]
-```
+## Product evidence
+
+### PDF requirements become reviewable rules
+
+![Searchable PDF converted into an evidence-linked rule candidate](docs/portfolio/01-spec-to-rules.png)
+
+PDF.js extracts and fingerprints the document in the browser. The candidate must satisfy `rule-schema.v1.json`, and every excerpt must exist on its cited page. The policy remains inactive until a person approves it.
+
+### Detector output stays connected to human review
+
+![PCB open-circuit finding in the review workspace](docs/portfolio/02-inspection-review.png)
+
+The same workspace supports boxes, confidence filtering, a contextual crop, accept/dismiss actions, notes, and report export. The PCB screenshot is a real cached YOLOX-Nano internal-validation prediction—not a fabricated browser result.
+
+### Every disposition has a deterministic trace
+
+![Deterministic FAIL decision and ordered trace](docs/portfolio/03-decision-trace.png)
+
+The LLM never decides whether an inspected image passes or fails. The approved policy and detector findings enter a deterministic engine with fixed precedence and an ordered audit trail.
+
+### Three real inputs, three operational outcomes
+
+![PASS, REVIEW, and FAIL PCB input-output pairs](docs/portfolio/05-input-output-cases.png)
+
+The three samples come from the internal validation subset of [DsPCBSD+](https://figshare.com/articles/dataset/DsPCBSD_/24970329), used under CC BY 4.0. The official validation partition remains the frozen test split and was not accessed for the public demo.
+
+## Engineering architecture
+
+![Visual Inspection Studio engineering architecture](docs/portfolio/04-architecture.png)
+
+The architecture separates four responsibilities:
+
+- specification intake translates untrusted document text into a strict candidate;
+- governance validates schema and page evidence, then requires explicit approval;
+- the detector adapter owns preprocessing, inference, decoding, and NMS;
+- the deterministic rule engine combines approved policy, detector findings, and reviewer corrections.
+
+This separation makes the detector replaceable without rewriting the client-facing workflow and prevents an LLM response from becoming a quality decision.
+
+## Safe public mode and owner mode
+
+| Capability | Public demo | Owner live mode |
+| --- | --- | --- |
+| Sample searchable PCB PDF | Included | Included |
+| Rule extraction | Recorded candidate | Live structured LLM call |
+| Paid calls | Hard-limited to zero | Allowed for the configured owner only |
+| Candidate validation | AJV contract + exact page evidence | AJV contract + exact page evidence |
+| Human approval | Required | Required |
+| PCB examples | Three real cached validation predictions | Same examples |
+| Arbitrary image upload | General COCO detector, in browser | General COCO detector, in browser |
+| Arbitrary PDF upload | Disabled | Enabled |
+
+The live `/api/specs/extract` route checks the hosting-provided authenticated-user ID before parsing the request or contacting the model provider. Missing configuration fails closed in production. The API key and owner identifier are hosting secrets and never enter client JavaScript or tracked files.
 
 ## What works today
 
-### Hosted general-object demo
+### Public PCB decision walkthrough
 
-The working browser mode uses the official YOLOX-Nano COCO checkpoint. It
-recognizes 80 everyday categories such as people, vehicles, bottles, furniture,
-and electronics. It does **not** recognize PCB defects, scratches, dents, rust,
-or cracks. Model bytes are pinned by SHA-256 and verified before inference.
+- one searchable two-page PCB acceptance-spec example;
+- five recorded evidence-linked rules checked against the actual PDF fingerprint;
+- explicit approval before activation;
+- one PASS spur, one REVIEW conductor scratch, and one FAIL open-circuit case;
+- real cached YOLOX-Nano predictions from the internal validation split;
+- boxes, confidence controls, crop review, corrections, notes, trace, JSON, and CSV;
+- zero public LLM calls and no frozen-test access.
+
+### Live general-object browser inference
+
+The deployed ONNX model is the official YOLOX-Nano COCO checkpoint. It recognizes 80 everyday categories and runs locally with ONNX Runtime Web in a Web Worker. Images do not go to an inference API.
+
+This mode does **not** claim to detect PCB defects, scratches, dents, rust, or cracks. The interface never relabels generic COCO output as industrial findings.
+
+### Owner-only live quality-spec extraction
+
+In owner mode, searchable PDF text is sent through the protected server route to the configured model (Terra by default). The Responses API must return strict JSON. AJV, rule normalization, evidence verification, and human approval all run before the existing deterministic engine can use the policy.
+
+The first version deliberately rejects scanned/image-only, encrypted, oversized, and non-searchable PDFs. Unsupported requirements become `REVIEW`; they are never silently ignored.
 
 ### Specialized PCB detector
 
-A separate YOLOX-Nano detector was trained on the DsPCBSD+ PCB defect benchmark
-using only the training split. It covers nine annotated defect categories. The
-checkpoint is evaluated offline and is not presented as browser inference until
-its ONNX export and decoder are verified end to end.
-
-This distinction is deliberate: the interface never relabels generic COCO
-predictions as industrial defects and never displays fabricated results.
-
-### Quality-spec PDF → approved rules
-
-The first governed extraction path is working end to end:
-
-1. PDF.js extracts selectable text per page in the browser and creates a
-   SHA-256 document fingerprint.
-2. The server sends only page-labelled text and the active detector vocabulary
-   to the configured model (Terra by default).
-3. The Responses API must return the strict
-   [`spec-extraction-output-schema.v1.json`](inspection/spec-extraction-output-schema.v1.json)
-   shape.
-4. The adapter converts that output to the canonical
-   [`rule-schema.v1.json`](inspection/rule-schema.v1.json) contract.
-5. AJV validates the policy and the application verifies that every evidence
-   excerpt occurs on the declared source page.
-6. A human reviews and explicitly approves the candidate. Approval is the only
-   path that can replace the active policy.
-7. The existing deterministic engine—not the LLM—uses the approved rules for
-   image decisions.
-
-The MVP deliberately supports searchable PDFs only. Scanned, encrypted,
-image-only, oversized, or semantically unsupported requirements fail closed.
-For example, a “scratch longer than 2 mm” rule becomes `REVIEW` because the
-current detector has neither a scratch class nor calibrated physical-scale
-measurement. It is never silently ignored or converted into a fabricated
-decision.
-
-### Deterministic inspection rules
-
-The rule engine supports class-specific outcomes and severity, maximum defect
-counts, confidence review bands, reviewer corrections, and unsupported
-requirements. Conflicts always resolve as `FAIL > REVIEW > PASS`, and reports
-contain the ordered reasoning trace. The shipped COCO policy and PCB policy are
-explicit examples—not factory acceptance specifications.
-
-See [`inspection/README.md`](inspection/README.md) or run:
-
-```bash
-npm run rules:examples
-```
-
-### Reproducible example pipeline
-
-The repository includes the same two-page searchable PDF used by the UI:
-[`factory-quality-spec-example.pdf`](output/pdf/factory-quality-spec-example.pdf).
-It contains supported camera-visible rules plus two requirements that the
-current detector cannot verify.
-
-The final browser QA on 2026-09-13 produced seven evidence-linked rules from 2
-pages / 2,984 extracted characters in 10.034 seconds using 2,801 total tokens;
-the candidate remained inactive until the approval button was selected. The CLI
-harness separately verifies that, after its explicit approval step, a synthetic
-92% `person` finding produces `FAIL / critical` with
-`personnel-exclusion` as the decisive rule. The scratch-measurement and
-missing-component requirements remain `REVIEW`. These are integration
-observations, not accuracy or latency benchmarks; model output and network
-timing can vary.
-
-With `OPENAI_API_KEY` set, reproduce the pipeline with:
-
-```bash
-npm run spec:example
-```
+A separate YOLOX-Nano model was trained on the DsPCBSD+ PCB benchmark using only the training split and evaluated on the internal validation split. The public site exposes selected cached predictions transparently. It does not call those cached samples “live inference,” and it does not ship the specialized checkpoint until browser export and decoder parity are verified end to end.
 
 ## Measured detector evidence
 
-The PCB detector was trained on 7,357 DsPCBSD+ training images and evaluated on
-851 validation images at class-aware IoU 0.5. The frozen test split remains
-sealed.
+YOLOX-Nano was trained on 7,357 DsPCBSD+ training images and evaluated on 851 internal-validation images at class-aware IoU 0.5. The frozen official validation/test partition remains sealed.
 
 | Validation profile | Precision | Recall | F1 | Ranked mAP@0.5 |
 | --- | ---: | ---: | ---: | ---: |
 | Global threshold 0.37 | 69.86% | 66.19% | 67.98% | 69.41% |
 | Class-specific, precision-first | 76.97% | 64.53% | 70.20% | 69.41% |
 
-The precision-first profile removes 150 false positives while losing 27 true
-positives. It is an operator choice, not a claim that every metric improved.
-Full protocol and per-class evidence are in
-[`detector/experiments/2026-09-12-yolox-nano-validation.md`](detector/experiments/2026-09-12-yolox-nano-validation.md)
-and
-[`detector/experiments/2026-09-12-class-thresholds-validation.md`](detector/experiments/2026-09-12-class-thresholds-validation.md).
+The precision-first profile removes 150 false positives while losing 27 true positives. It is an operator choice, not a claim that every metric improved. See the full [YOLOX validation protocol](detector/experiments/2026-09-12-yolox-nano-validation.md) and [class-threshold analysis](detector/experiments/2026-09-12-class-thresholds-validation.md).
 
-The earlier Terra hybrid is retained as a negative baseline: it did not improve
-the automatic detector and added API cost. See
-[`detector/experiments/2026-09-12-hybrid-validation.md`](detector/experiments/2026-09-12-hybrid-validation.md).
+### Isolated YOLOv8 comparison
 
-### Isolated backend comparison
-
-The application now has a model-agnostic detector contract. YOLOX remains the
-only deployed/default browser backend; YOLOv8n is kept in a separate training
-and evaluation path because its deployment license has not been selected.
+YOLOv8n remains an isolated comparison backend because deployment licensing has not been selected. It is not part of the public runtime.
 
 | Detector (256 px, 5 epochs) | Precision | Recall | F1 | mAP@0.5 | Wall latency | Checkpoint |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | YOLOX-Nano | 69.86% | 66.19% | 67.98% | 69.41% | 23.32 ms/image | 7.22 MiB |
 | YOLOv8n, isolated | 65.03% | 55.52% | 59.90% | 62.15% | 14.33 ms/image | 5.91 MiB |
 
-This first controlled YOLOv8n run is faster, but it does not beat the YOLOX
-quality baseline. It therefore remains a reversible experiment rather than a
-deployment replacement. See the full protocol and interpretation limits in
-[`detector/experiments/2026-09-12-yolox-vs-yolov8n-validation.md`](detector/experiments/2026-09-12-yolox-vs-yolov8n-validation.md).
+The first controlled YOLOv8n run is faster but does not beat YOLOX quality, so YOLOX remains the default. See the [comparison protocol](detector/experiments/2026-09-12-yolox-vs-yolov8n-validation.md). The earlier Terra hybrid remains a [negative baseline](detector/experiments/2026-09-12-hybrid-validation.md); it did not improve the automatic detector.
 
-## Engineering decisions
+## Implementation details
 
-- Inference runs in a Web Worker, so model work does not block the review UI.
-- Browser input has file-type, file-size, pixel-count, timeout, and malformed-output guardrails.
-- PDF intake is limited to 10 MB, 25 pages, 15,000 characters per page, and
-  80,000 characters total; image-only PDFs are rejected.
-- Both JSON schemas are compiled to standalone AJV validators during development
-  and checked before production builds. No runtime code generation is required
-  in the Cloudflare worker.
-- The LLM receives document text as untrusted data, returns a candidate only,
-  and is separated from the deterministic decision engine by validation and a
-  human approval gate.
-- Every document-derived rule retains the PDF fingerprint, source page, and an
-  exact evidence excerpt. Evidence mismatches block approval.
-- Coordinates remain in original-image pixel space from detection through export.
-- CSV values are protected against spreadsheet-formula injection.
-- Review changes trigger leave/replace protection until a complete report is exported.
-- Model and runtime licenses are stored beside the distributed artifacts.
-- Accuracy evidence is split-aware; validation results are never described as test or production performance.
+- **UI/runtime:** React 19, TypeScript, vinext/Next-compatible routing, Cloudflare Workers/Sites
+- **Vision:** ONNX Runtime Web, Web Worker inference, model-owned preprocessing and decoding
+- **Document intake:** PDF.js, SHA-256 fingerprinting, page-labelled text
+- **Governance:** JSON Schema, precompiled AJV standalone validators, exact evidence verification
+- **LLM boundary:** strict Responses API output, `store: false`, candidate-only output, owner authorization
+- **Decision engine:** class outcomes, severity, maximum counts, confidence review bands, unsupported-rule handling, stable precedence
+- **Reports:** original-pixel `xywh`, model provenance, timing, review state, notes, decision evidence, safe CSV cells
+- **Quality:** 60 automated tests plus TypeScript, ESLint, schema, production-build, and browser checks
 
 ## Adapt it to a client dataset
 
-The detector and review application are intentionally separated. A client
-engagement can replace the model without rewriting the operator experience:
-
-1. Define the client’s defect taxonomy, camera setup, acceptance criteria, and
-   train/validation/test split before training.
-2. Convert labelled images to the versioned manifest described in
-   [`evaluation/README.md`](evaluation/README.md).
-3. Implement or select a backend through [`lib/detectors/types.ts`](lib/detectors/types.ts),
-   then train on `train` and select operating thresholds on `validation` only.
-4. Export the approved checkpoint to ONNX and verify preprocessing, output
-   decoding, NMS, labels, and a known validation sample.
-5. Add the approved ONNX artifact and its checksum to a detector adapter; keep
-   experimental or license-unresolved adapters isolated from the deployed registry.
-6. Run the browser tests and compare exported coordinates and scores against the
-   reference Python inference before deployment.
-
-The current YOLOX adapter uses a 416 × 416 top-left letterbox, BGR CHW float32
-values in the 0–255 range, and YOLOX decoding. Detector adapters own their input
-contract and decoding, while the review, batch, and reporting components remain
-unchanged.
+1. Define the client’s defect taxonomy, camera setup, acceptance criteria, and split protocol.
+2. Convert labelled images to the versioned manifest described in [`evaluation/README.md`](evaluation/README.md).
+3. Implement a backend through [`lib/detectors/types.ts`](lib/detectors/types.ts).
+4. Train only on `train`; select thresholds and routing on `validation`.
+5. Export the approved checkpoint to ONNX and verify preprocessing, output decoding, NMS, labels, and reference-sample parity.
+6. Register the verified backend while keeping the review, rule, batch, and reporting layers unchanged.
+7. Replace the example PDF policy with client-approved requirements and document unsupported capabilities.
 
 ## Local development
 
 ```bash
 npm ci
-npm run schema:check
+npm run demo:prepare
 npm run dev
 ```
 
 Open `http://localhost:5173`.
 
-To enable PDF rule extraction, provide the secret to the server process. Never
-place a real key in source code, tracked JSON, or a committed `.env` file.
+Live owner extraction is optional. Never place real credentials in source code, tracked JSON, or a committed `.env` file.
 
 ```powershell
 $env:OPENAI_API_KEY = "your-key"
-# Optional; defaults to gpt-5.6-terra
-$env:OPENAI_RULE_EXTRACTION_MODEL = "gpt-5.6-terra"
+$env:OWNER_ACCOUNT_USER_ID = "your-hosting-user-id"
+$env:OPENAI_RULE_EXTRACTION_MODEL = "gpt-5.6-terra" # optional
 npm run dev
 ```
 
-Production deployments must configure `OPENAI_API_KEY` as a hosting secret. The
-browser never receives it. The extraction request uses `store: false`.
+Production uses protected hosting environment variables. Anonymous visitors receive public mode; only the matching authenticated-user ID can reach live extraction.
 
-Quality checks:
+### Quality checks
 
 ```bash
 npm run typecheck
@@ -255,43 +189,36 @@ npm run schema:check
 npm run build
 ```
 
-Detector training and validation setup is documented in
-[`detector/README.md`](detector/README.md). The dataset, checkpoints, predictions,
-and local reports stay under ignored `reports/local/` paths.
+Documentation captures are reproducible while the local server is running:
+
+```bash
+node scripts/capture-portfolio.mjs
+node scripts/render-portfolio-assets.mjs
+```
 
 ## Repository map
 
 ```text
-app/          Inspection and batch-review interface
-inspection/   Runtime and strict-extraction schemas plus example policies
-lib/          Inference, PDF parsing, rule extraction, validation, and reporting
+app/          Product UI and protected server routes
+inspection/   Runtime schemas and example policies
+lib/          Detectors, PDF intake, validation, rules, authorization, reports
 detector/     Reproducible detector training and validation pipelines
 evaluation/   Dataset manifest and split-integrity documentation
-output/pdf/   Searchable quality-spec example used by the end-to-end demo
-scripts/      Validator generation, example pipeline, and experiment tooling
-tests/        Detection, export, evaluation, VLM, and routing tests
-vlm/          Preserved VLM baselines and local adapter documentation
+public/       Browser model plus the safe public PDF/PCB examples
+docs/         GitHub and Upwork product captures
+scripts/      Dataset, schema, demo, evaluation, and capture tooling
+tests/        Detection, authorization, rules, extraction, and demo tests
+vlm/          Preserved VLM baselines and adapter documentation
 ```
 
-## Privacy, limitations, and licenses
+## Privacy, limits, and licenses
 
-- The hosted demo processes images in the browser. Do not use it as the sole
-  basis for safety-critical decisions.
-- PDF text leaves the browser only after the user requests extraction and is
-  sent to the configured OpenAI model through the server. Do not upload
-  confidential production specifications without an approved data policy.
-- The first PDF version does not perform OCR, table reconstruction, unit
-  conversion, geometric calibration, or detector retraining. Unclear and
-  unsupported requirements route to `REVIEW`.
-- A public production deployment needs authentication, rate limiting, audit
-  retention policy, and tenant isolation before accepting real client documents.
-- First-run timing can include model loading. The UI reports measured time for
-  the current device rather than promising a fixed speed.
-- DsPCBSD+ is distributed under CC BY 4.0. Raw images are not committed here.
-- YOLOX is Apache-2.0; ONNX Runtime is MIT. Their notices are included in
-  `public/models/`.
-- The isolated YOLOv8 experiment uses Ultralytics 8.3.39 under AGPL-3.0 or
-  Ultralytics Enterprise terms; its package, weights, and checkpoints are not
-  included in the hosted application or repository.
-- Application code is MIT licensed. Third-party model and dataset terms still
-  apply.
+- Public users cannot trigger the paid LLM endpoint; owner authorization is enforced on the server.
+- Public PDF replay and PCB examples are non-confidential bundled assets.
+- Owner-mode PDF text leaves the browser only after an owner requests extraction. Do not process confidential specifications without an approved data policy.
+- The app is a portfolio engineering demo, not a certified factory quality system or a basis for safety-critical decisions.
+- Physical measurements require calibrated optics and scale metadata. Missing-part checks require a validated reference assembly or presence detector.
+- Only three attributed DsPCBSD+ internal-validation examples are committed; the raw dataset remains local. DsPCBSD+ is CC BY 4.0.
+- YOLOX is Apache-2.0 and ONNX Runtime is MIT; notices are stored beside distributed model assets.
+- The isolated Ultralytics experiment is subject to AGPL-3.0 or Ultralytics Enterprise terms and is not distributed in the hosted application.
+- Application code is MIT licensed. Third-party model and dataset terms still apply.

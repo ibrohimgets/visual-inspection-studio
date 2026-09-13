@@ -62,11 +62,14 @@ export default defineConfig(async ({ command }) => {
           ...localBindingConfig,
           // Forward shell credentials only to the ephemeral local Worker. The
           // production build never serializes them; Sites supplies its own env.
-          ...(command === "serve" && process.env.OPENAI_API_KEY ? {
+          ...(command === "serve" && (process.env.OPENAI_API_KEY || process.env.OWNER_ACCOUNT_USER_ID) ? {
             vars: {
-              OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+              ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
               ...(process.env.OPENAI_RULE_EXTRACTION_MODEL
                 ? { OPENAI_RULE_EXTRACTION_MODEL: process.env.OPENAI_RULE_EXTRACTION_MODEL }
+                : {}),
+              ...(process.env.OWNER_ACCOUNT_USER_ID
+                ? { OWNER_ACCOUNT_USER_ID: process.env.OWNER_ACCOUNT_USER_ID }
                 : {}),
             },
           } : {}),

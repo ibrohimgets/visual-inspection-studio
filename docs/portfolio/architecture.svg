@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Visual Inspection Studio engineering architecture</title>
+  <desc id="desc">Quality specification ingestion, governed rule approval, computer vision inspection, deterministic decision logic, and auditable reporting.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#587487"/>
+    </marker>
+    <style>
+      .sans{font-family:Segoe UI,Arial,sans-serif}.mono{font-family:Consolas,Menlo,monospace}.lane{fill:#f5f8fa;stroke:#d6e0e5;stroke-width:2}.box{fill:#fff;stroke:#bfcdd5;stroke-width:2}.strong{fill:#142d3f}.approved{fill:#edf6f1;stroke:#80aa94}.review{fill:#fff6e5;stroke:#d2a85c}.output{fill:#f1f5f8;stroke:#8aa4b4}.server{fill:#eef4f7;stroke:#7ea1b4;stroke-dasharray:8 6}.line{fill:none;stroke:#587487;stroke-width:3;marker-end:url(#arrow)}.join{fill:none;stroke:#587487;stroke-width:3}.label{font-size:17px;fill:#657681}.title{font-size:25px;font-weight:700;fill:#142d3f}.boxTitle{font-size:20px;font-weight:650;fill:#203744}.copy{font-size:16px;fill:#61727d}.tag{font-size:13px;letter-spacing:1px;fill:#496779}.white{fill:#fff}.small{font-size:14px;fill:#687a85}
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <rect x="0" y="0" width="1600" height="92" class="strong"/>
+  <text x="58" y="43" class="sans white" font-size="28" font-weight="700">Visual Inspection Studio</text>
+  <text x="58" y="70" class="mono" fill="#b9ccd7" font-size="14">GOVERNED INDUSTRIAL COMPUTER VISION ARCHITECTURE</text>
+  <text x="1542" y="55" text-anchor="end" class="sans" fill="#d7e3e9" font-size="16">PDF → approved rules → detector → decision → report</text>
+
+  <rect x="44" y="124" width="1512" height="152" rx="4" class="lane"/>
+  <text x="68" y="157" class="mono tag">01 · SPECIFICATION INTAKE</text>
+  <rect x="68" y="177" width="240" height="72" rx="3" class="box"/>
+  <text x="88" y="208" class="sans boxTitle">Searchable PDF</text><text x="88" y="233" class="sans copy">Factory quality requirements</text>
+  <path d="M308 213 H368" class="line"/>
+  <rect x="374" y="177" width="250" height="72" rx="3" class="box"/>
+  <text x="394" y="208" class="sans boxTitle">Local PDF parser</text><text x="394" y="233" class="sans copy">Pages + SHA-256 fingerprint</text>
+  <path d="M624 213 H684" class="line"/>
+  <rect x="690" y="166" width="310" height="94" rx="3" class="server"/>
+  <text x="710" y="197" class="sans boxTitle">Structured LLM extraction</text><text x="710" y="222" class="sans copy">Owner-only protected server route</text><text x="710" y="245" class="mono small">PUBLIC: RECORDED / 0 PAID CALLS</text>
+  <path d="M1000 213 H1060" class="line"/>
+  <rect x="1066" y="177" width="280" height="72" rx="3" class="box"/>
+  <text x="1086" y="208" class="sans boxTitle">Strict rule candidate</text><text x="1086" y="233" class="sans copy">JSON only, never active yet</text>
+  <path d="M1346 213 H1406" class="line"/>
+  <rect x="1412" y="177" width="120" height="72" rx="3" class="approved"/>
+  <text x="1472" y="207" text-anchor="middle" class="mono" font-size="14" fill="#2e664b">CANDIDATE</text><text x="1472" y="232" text-anchor="middle" class="sans small">inactive</text>
+
+  <rect x="44" y="300" width="1512" height="152" rx="4" class="lane"/>
+  <text x="68" y="333" class="mono tag">02 · GOVERNANCE AND APPROVAL</text>
+  <rect x="226" y="351" width="290" height="72" rx="3" class="box"/>
+  <text x="246" y="382" class="sans boxTitle">AJV runtime contract</text><text x="246" y="407" class="sans copy">rule-schema.v1.json</text>
+  <path d="M516 387 H596" class="line"/>
+  <rect x="602" y="351" width="290" height="72" rx="3" class="box"/>
+  <text x="622" y="382" class="sans boxTitle">Evidence verification</text><text x="622" y="407" class="sans copy">Exact excerpt on cited page</text>
+  <path d="M892 387 H972" class="line"/>
+  <rect x="978" y="351" width="250" height="72" rx="3" class="review"/>
+  <text x="998" y="382" class="sans boxTitle">Human approval gate</text><text x="998" y="407" class="sans copy">Explicit operator action</text>
+  <path d="M1228 387 H1308" class="line"/>
+  <rect x="1314" y="351" width="218" height="72" rx="3" class="approved"/>
+  <text x="1334" y="382" class="sans boxTitle">Approved policy</text><text x="1334" y="407" class="sans copy">Versioned + reversible</text>
+
+  <rect x="44" y="476" width="1512" height="152" rx="4" class="lane"/>
+  <text x="68" y="509" class="mono tag">03 · VISUAL INSPECTION</text>
+  <rect x="68" y="527" width="240" height="72" rx="3" class="box"/>
+  <text x="88" y="558" class="sans boxTitle">Image or batch</text><text x="88" y="583" class="sans copy">Client product samples</text>
+  <path d="M308 563 H388" class="line"/>
+  <rect x="394" y="516" width="350" height="94" rx="3" class="box"/>
+  <text x="414" y="547" class="sans boxTitle">Model-agnostic detector adapter</text><text x="414" y="572" class="sans copy">YOLOX default · YOLOv8 isolated</text><text x="414" y="594" class="mono small">PREPROCESS → INFER → DECODE → NMS</text>
+  <path d="M744 563 H824" class="line"/>
+  <rect x="830" y="527" width="270" height="72" rx="3" class="output"/>
+  <text x="850" y="558" class="sans boxTitle">Defect findings</text><text x="850" y="583" class="sans copy">Box, class, confidence, latency</text>
+  <path d="M1100 563 H1180" class="line"/>
+  <rect x="1186" y="527" width="346" height="72" rx="3" class="review"/>
+  <text x="1206" y="558" class="sans boxTitle">Operator review + corrections</text><text x="1206" y="583" class="sans copy">Accept, dismiss, zoom, notes</text>
+
+  <rect x="44" y="652" width="1512" height="188" rx="4" class="lane"/>
+  <text x="68" y="685" class="mono tag">04 · DETERMINISTIC DECISION AND REPORTING</text>
+  <path d="M1423 423 V670 H930 V706" class="line"/>
+  <path d="M965 599 V706" class="line"/>
+  <path d="M1359 599 V688 H1010 V706" class="line"/>
+  <rect x="592" y="706" width="463" height="92" rx="3" class="strong"/>
+  <text x="823" y="741" text-anchor="middle" class="sans white" font-size="22" font-weight="700">Deterministic rule engine</text>
+  <text x="823" y="768" text-anchor="middle" class="sans" fill="#c7d7df" font-size="16">FAIL &gt; REVIEW &gt; PASS · ordered decision trace</text>
+  <path d="M1055 752 H1135" class="line"/>
+  <rect x="1141" y="706" width="170" height="92" rx="3" class="output"/>
+  <text x="1226" y="743" text-anchor="middle" class="mono" font-size="20" font-weight="700" fill="#203744">PASS / FAIL</text>
+  <text x="1226" y="770" text-anchor="middle" class="mono" font-size="16" fill="#8a5a12">/ REVIEW</text>
+  <path d="M1311 752 H1371" class="line"/>
+  <rect x="1377" y="706" width="155" height="92" rx="3" class="approved"/>
+  <text x="1455" y="741" text-anchor="middle" class="sans boxTitle">Audit report</text><text x="1455" y="768" text-anchor="middle" class="sans copy">JSON + CSV</text>
+
+  <text x="58" y="875" class="mono small">TRUST BOUNDARIES: images stay in browser · paid extraction is owner-only · LLM output cannot decide quality · frozen test split remains sealed</text>
+</svg>
