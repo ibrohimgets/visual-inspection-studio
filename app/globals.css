@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
+@import "./portfolio.css";
 :root {
   --background: #fff; --foreground: #20252b; --card: #fff; --card-foreground: #20252b;
   --popover: #fff; --popover-foreground: #20252b; --primary: #285b93; --primary-foreground: #fff;

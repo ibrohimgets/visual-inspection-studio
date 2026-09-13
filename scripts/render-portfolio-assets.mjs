@@ -14,7 +14,7 @@ await sharp(cover).extend({
   bottom: Math.ceil(verticalPadding / 2),
   left: 0,
   right: 0,
-  background: "#eef2f4",
+  background: "#070d16",
 }).png().toFile(resolve(portfolio, "upwork-cover-1600x1200.png"));
 
 const demo = JSON.parse(await readFile(resolve(root, "public/examples/pcb-demo/demo.json"), "utf8"));

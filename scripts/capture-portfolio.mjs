@@ -98,7 +98,7 @@ try {
   await client.send("Runtime.enable");
   await client.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await poll(async () => {
-    const result = await client.send("Runtime.evaluate", { expression: "document.readyState === 'complete' && !!document.querySelector('.overview-proof')", returnByValue: true });
+    const result = await client.send("Runtime.evaluate", { expression: "document.readyState === 'complete' && !!document.querySelector('.premium-hero')", returnByValue: true });
     return result.result.value;
   }, "the overview page");
 
@@ -122,10 +122,11 @@ try {
   }
 
   await evaluate("document.fonts.ready");
+  await client.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await wait(1_000);
   await evaluate("window.scrollTo(0, 0)");
   const outputs = [await capture("cover.png")];
-  await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Start 30-second demo')).click()");
+  await evaluate("[...document.querySelectorAll('.premium-button')].find(button => button.textContent.includes('Try Demo')).click()");
   await waitForText("Approve & activate policy");
   await evaluate("window.scrollTo(0, document.querySelector('.workspace-tabs').offsetTop - 12)");
   outputs.push(await capture("01-spec-to-rules.png"));
@@ -133,7 +134,7 @@ try {
   await waitForText("Open inspection cases");
   await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Open inspection cases')).click()");
   await waitForText("Open review workspace");
-  await evaluate("document.querySelectorAll('.case-link')[2].click()");
+  await evaluate("document.querySelector('.preview-review-action').click()");
   await waitForText("Recorded specialized-detector evidence");
   await evaluate("window.scrollTo(0, document.querySelector('.workspace-tabs').offsetTop - 12)");
   outputs.push(await capture("02-inspection-review.png"));
@@ -141,6 +142,34 @@ try {
   await waitForText("ORDERED AUDIT TRAIL");
   await evaluate("window.scrollTo(0, document.querySelector('.workspace-tabs').offsetTop - 12)");
   outputs.push(await capture("03-decision-trace.png"));
+  await client.send("Page.navigate", { url: BASE_URL });
+  await waitForText("AI-powered");
+  await poll(() => evaluate("document.querySelector('.access-badge')?.textContent.includes('Safe public demo') || !!document.querySelector('.access-switch')"), "client hydration");
+  const outcomes = [];
+  for (let index = 0; index < 3; index += 1) {
+    await evaluate(`document.querySelectorAll('.preview-case-picker button')[${index}].click()`);
+    await wait(100);
+    outcomes.push(await evaluate("document.querySelector('.preview-decision > strong').childNodes[0].textContent"));
+  }
+  if (outcomes.join(',') !== 'PASS,REVIEW,FAIL') throw new Error(`Unexpected preview outcomes: ${outcomes}`);
+  await evaluate("document.querySelector('.preview-segment button').click()");
+  if (await evaluate("document.querySelectorAll('.preview-image .pcb-region').length") !== 0) throw new Error("Original view still shows boxes.");
+  await evaluate("document.querySelectorAll('.preview-segment button')[1].click()");
+  if (await evaluate("document.querySelectorAll('.preview-image .pcb-region').length") !== 1) throw new Error("Detection view is missing its box.");
+  await evaluate("document.querySelector('#product-preview').scrollIntoView()");
+  outputs.push(await capture("06-interactive-preview.png"));
+  await evaluate("document.querySelector('#performance').scrollIntoView()");
+  outputs.push(await capture("08-performance.png"));
+  await evaluate("document.querySelector('.defect-detail-section').scrollIntoView()");
+  outputs.push(await capture("09-defect-detail.png"));
+  await client.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await evaluate("window.scrollTo(0,0)");
+  await wait(300);
+  const mobile = await evaluate("({ width: innerWidth, documentWidth: document.documentElement.scrollWidth, heroWidth: document.querySelector('.premium-hero').getBoundingClientRect().width })");
+  if (mobile.documentWidth > mobile.width) throw new Error(`Mobile overflow: ${JSON.stringify(mobile)}`);
+  outputs.push(await capture("07-mobile-home.png"));
+  await client.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await evaluate("window.scrollTo(0,0)");
   console.log(JSON.stringify({ baseUrl: BASE_URL, outputs }, null, 2));
 } finally {
   client?.close();

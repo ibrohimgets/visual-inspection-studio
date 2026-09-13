@@ -12,7 +12,7 @@ It is built for the part clients need after model training: reliable intake, vis
 
 ## Understand it in 30 seconds
 
-1. Select **Start 30-second demo**.
+1. Select **Try Demo**.
 2. Open the real two-page PCB quality specification.
 3. Review five extracted rules and their exact page evidence.
 4. Select **Approve & activate policy**. Nothing activates before this action.
@@ -34,6 +34,12 @@ The public walkthrough is safe by design: it uses a recorded, schema-valid extra
 | “Use our own model and defect classes” | Model-agnostic detector adapter and documented ONNX integration boundary |
 
 ## Product evidence
+
+### Explore the inspection workflow
+
+![Interactive PCB case preview with real recorded detections](docs/portfolio/06-interactive-preview.png)
+
+The homepage lets visitors switch between PASS, REVIEW, and FAIL examples and compare each original image with its recorded detector output. The presentation uses real PCB imagery, measured model statistics, and a responsive layout with reduced-motion support.
 
 ### PDF requirements become reviewable rules
 

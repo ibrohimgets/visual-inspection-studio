@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { ArrowRight, ClipboardCheck, FileDown, FileText, LockKeyhole, ScanLine, ShieldCheck, UserCheck } from "lucide-react";
+import { ArrowRight, LockKeyhole, ScanLine } from "lucide-react";
+import PortfolioHome from "./portfolio-home";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CLASSES, MODEL, createReport, reportCsv, validateImageFile, visibleDetections } from "@/lib/detection";
@@ -189,12 +190,14 @@ export default function Home() {
   }
 
   function startPublicDemo() {
+    window.scrollTo({ top: 0, behavior: "instant" });
     setWorkspaceAccess("public");
     setActiveTab("spec");
     void loadExampleSpec(true);
   }
 
   function openPublicSample(sample: PublicDemoSample) {
+    window.scrollTo({ top: 0, behavior: "instant" });
     if (!candidateApproved) {
       setActiveTab("spec");
       setNotice("Review and approve the recorded rule candidate before opening inspection outcomes.");
@@ -609,9 +612,10 @@ export default function Home() {
   }
 
   return (
-    <main className="studio">
+    <main className={`studio ${activeTab === "overview" ? "landing-mode" : ""}`}>
       <header className="app-header">
-        <div className="wordmark">Visual Inspection <span>Studio</span></div>
+        <div className="wordmark">{activeTab === "overview" && <ScanLine size={24} aria-hidden="true" />}Visual Inspection <span>Studio</span></div>
+        {activeTab === "overview" && <nav className="landing-nav" aria-label="Homepage"><a href="#how-it-works">How it works</a><a href="#product-preview">Product</a><a href="#performance">Performance</a><button onClick={() => setActiveTab("review")}>Workspace</button></nav>}
         <div className="header-meta">
           <span className="header-capabilities">Local vision · Approved rules · Auditable reports</span>
           {accessMode === "owner" ? <div className="access-switch" aria-label="Demo access mode">
@@ -622,13 +626,7 @@ export default function Home() {
         </div>
       </header>
       <div className={`page-heading ${activeTab === "overview" ? "portfolio-heading" : ""}`}>
-        {activeTab === "overview" ? <>
-          <div className="portfolio-heading-copy"><p className="breadcrumb">INDUSTRIAL COMPUTER VISION / GOVERNED QA</p><h1>Turn quality requirements into auditable inspection decisions.</h1><p className="heading-copy">A quality PDF becomes approved logic. A detector finds defects. A deterministic engine explains every PASS, FAIL, or REVIEW decision.</p></div>
-          <div className="heading-actions portfolio-actions">
-            <Button onClick={startPublicDemo}>Start 30-second demo <ArrowRight size={15} aria-hidden="true" /></Button>
-            <a className="button-link secondary" href={PUBLIC_DEMO.spec.pdfPath} target="_blank" rel="noreferrer">View sample spec</a>
-          </div>
-        </> : <>
+        {activeTab !== "overview" && <>
           <div><p className="breadcrumb">Workspace / {activeDemoSample ? "Recorded PCB inspection" : modeLabel[mode]}</p><h1>{activeDemoSample ? activeDemoSample.title : "Inspect, review, export"}</h1><p className="heading-copy">{activeDemoSample ? `${activeDemoSample.clientSummary} Real validation prediction; no live API call.` : "Run a real detector, verify each region, and download an audit-ready report."}</p></div>
           <div className="heading-actions">
             {activeDemoSample ? <>
@@ -656,51 +654,7 @@ export default function Home() {
         {activeDemoSample ? <div className="mode-banner recorded" role="status"><div><strong>Recorded specialized-detector evidence</strong><p>This is a real cached YOLOX-Nano PCB validation prediction. Review and export work normally; rerunning the specialized model is intentionally unavailable in the public browser demo.</p></div><span>0 LLM calls · frozen test untouched</span></div>
           : mode === "surface-defect" && <div className="mode-banner" role="status"><div><strong>Surface Defect Inspection is not configured for arbitrary browser uploads</strong><p>Use the Overview for verified PCB validation cases, or connect a client-approved ONNX model for live product-specific inference.</p></div><button className="text-control" onClick={() => setActiveTab("overview")}>Open verified cases</button></div>}
         <TabsContent value="overview" className="overview-workspace">
-          <section className="overview-proof">
-            <div className="proof-copy"><span className="eyebrow">SAFE PUBLIC WALKTHROUGH</span><h2>See the whole inspection decision—not just a bounding box.</h2><p>Follow one controlled path from a searchable PCB specification to reviewed rules, real detector findings, an operator decision, and a structured report.</p>
-              <div className="proof-actions"><Button onClick={candidateApproved ? () => openPublicSample(PUBLIC_DEMO.samples[2]) : startPublicDemo}>{candidateApproved ? "Open a critical defect" : "Start with the sample PDF"} <ArrowRight size={15} aria-hidden="true" /></Button><span><ShieldCheck size={15} aria-hidden="true" /> Public walkthrough makes zero paid calls</span></div>
-            </div>
-            <figure className="overview-visual">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={PUBLIC_DEMO.samples[2].annotatedPath} alt="PCB open-circuit defect localized by a bounding box" />
-              <figcaption><span>RULE DECISION</span><strong>FAIL</strong><small>critical · open circuit</small></figcaption>
-            </figure>
-          </section>
-          <section className="evidence-strip" aria-label="Demo evidence">
-            <div><strong>Real predictions</strong><span>Cached from the 851-image internal validation split</span></div>
-            <div><strong>Source-linked rules</strong><span>Every requirement cites a verified PDF page</span></div>
-            <div><strong>Human approval</strong><span>Generated candidates never activate automatically</span></div>
-            <div><strong>Auditable output</strong><span>Decision trace plus JSON and CSV reports</span></div>
-          </section>
-          <section className="how-section">
-            <div className="section-intro"><p className="breadcrumb">HOW IT WORKS</p><h2>From factory requirement to explainable disposition</h2><p>The LLM translates documents; it never replaces the detector or makes the final quality decision.</p></div>
-            <ol className="how-flow">
-              <li><span>01</span><FileText aria-hidden="true" /><strong>Read the spec</strong><p>Extract searchable, page-labelled PDF text.</p></li>
-              <li><span>02</span><ClipboardCheck aria-hidden="true" /><strong>Review the rules</strong><p>Validate strict JSON and approve cited requirements.</p></li>
-              <li><span>03</span><ScanLine aria-hidden="true" /><strong>Detect defects</strong><p>Locate PCB findings with a specialized vision model.</p></li>
-              <li><span>04</span><UserCheck aria-hidden="true" /><strong>Resolve uncertainty</strong><p>Accept, dismiss, annotate, or route to an operator.</p></li>
-              <li><span>05</span><FileDown aria-hidden="true" /><strong>Export evidence</strong><p>Save the outcome, boxes, timing, notes, and trace.</p></li>
-            </ol>
-          </section>
-          <section className="demo-cases">
-            <div className="section-intro"><p className="breadcrumb">VERIFIED PCB CASES</p><h2>One policy. Three operational outcomes.</h2><p>Each pair shows the original validation image and the real cached detector output. Approve the sample policy once, then inspect every case.</p></div>
-            <div className="case-grid">{PUBLIC_DEMO.samples.map(sample => <article className="case-card" key={sample.id}>
-              <div className="case-comparison">
-                <figure>
-                  <span>INPUT</span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={sample.imagePath} alt={`${sample.title} PCB input`} />
-                </figure>
-                <figure>
-                  <span>DETECTOR OUTPUT</span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={sample.annotatedPath} alt={`${sample.title} with detection box`} />
-                </figure>
-              </div>
-              <div className="case-body"><div><span className={`decision-badge ${sample.expectedOutcome.toLowerCase()}`}>{sample.expectedOutcome}</span><small>{sample.expectedSeverity} severity</small></div><h3>{sample.title}</h3><p>{sample.clientSummary}</p><button className="case-link" onClick={() => openPublicSample(sample)}>{candidateApproved ? "Open review workspace" : "Approve policy to inspect"} <ArrowRight size={14} aria-hidden="true" /></button></div>
-            </article>)}</div>
-            <p className="dataset-credit">Samples: <a href={PUBLIC_DEMO.dataset.source} target="_blank" rel="noreferrer">{PUBLIC_DEMO.dataset.name}</a>, {PUBLIC_DEMO.dataset.license}. Internal validation only; the frozen official validation/test partition was not accessed.</p>
-          </section>
+          <PortfolioHome onDemo={startPublicDemo} onInspect={openPublicSample} onEvidence={() => { window.scrollTo({ top: 0, behavior: "instant" }); setActiveTab("evaluation"); }} approved={candidateApproved} />
         </TabsContent>
         <TabsContent value="review">
           {inspectionInteractive && inspectionDecision && <section className={`decision-strip ${inspectionDecision.outcome.toLowerCase()}`} aria-label="Inspection decision">

@@ -48,6 +48,8 @@ This project demonstrates those engineering layers in one working product.
 
    *Real PCB validation inputs and detector outputs: PASS, human REVIEW, and critical FAIL under one approved policy.*
 
+   Optional product-view alternative: **`06-interactive-preview.png`**, showing the interactive case switcher and original/detection view.
+
 3. **`01-spec-to-rules.png`**
 
    *Searchable PDF intake with strict schema validation, page evidence, and a human approval gate.*
@@ -65,6 +67,8 @@ This project demonstrates those engineering layers in one working product.
    *Engineering architecture separating LLM extraction, policy governance, detector inference, human review, and reporting.*
 
 All visuals are direct product captures, code-rendered architecture, or attributed DsPCBSD+ samples. No generative concept art is used.
+
+The homepage cover uses a dark industrial presentation with a dimensional PCB panel. Additional assets include `07-mobile-home.png`, `08-performance.png`, and `09-defect-detail.png` for responsive design, measured results, and source-linked region detail.
 
 ## Suggested skills/tags
 
