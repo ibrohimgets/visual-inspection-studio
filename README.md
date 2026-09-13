@@ -125,13 +125,15 @@ The repository includes the same two-page searchable PDF used by the UI:
 It contains supported camera-visible rules plus two requirements that the
 current detector cannot verify.
 
-One observed local run on 2026-09-13 produced seven evidence-linked rules from
-2 pages / 2,984 extracted characters in 10.034 seconds using 2,801 total tokens.
-After explicit harness approval, a synthetic 92% `person` finding produced
-`FAIL / critical` with `personnel-exclusion` as the decisive rule. The scratch
-measurement and missing-component requirements remained `REVIEW`. This is an
-integration example, not an accuracy or latency benchmark; model output and
-network timing can vary.
+The final browser QA on 2026-09-13 produced seven evidence-linked rules from 2
+pages / 2,984 extracted characters in 10.034 seconds using 2,801 total tokens;
+the candidate remained inactive until the approval button was selected. The CLI
+harness separately verifies that, after its explicit approval step, a synthetic
+92% `person` finding produces `FAIL / critical` with
+`personnel-exclusion` as the decisive rule. The scratch-measurement and
+missing-component requirements remain `REVIEW`. These are integration
+observations, not accuracy or latency benchmarks; model output and network
+timing can vary.
 
 With `OPENAI_API_KEY` set, reproduce the pipeline with:
 
