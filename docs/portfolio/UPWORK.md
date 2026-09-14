@@ -42,7 +42,7 @@ This project demonstrates those engineering layers in one working product.
 
 1. **`upwork-cover-1600x1200.png`**
 
-   *From quality requirements to auditable inspection decisions.*
+   *Real PCB inputs and recorded detector outputs: from quality requirements to auditable inspection decisions.*
 
 2. **`05-input-output-cases.png`**
 
@@ -68,7 +68,7 @@ This project demonstrates those engineering layers in one working product.
 
 All visuals are direct product captures, code-rendered architecture, or attributed DsPCBSD+ samples. No generative concept art is used.
 
-The homepage cover uses a dark industrial presentation with a dimensional PCB panel. Additional assets include `07-mobile-home.png`, `08-performance.png`, and `09-defect-detail.png` for responsive design, measured results, and source-linked region detail.
+The portfolio cover uses real DsPCBSD+ PCB inputs and recorded detector outputs from the repository. Additional assets include `07-mobile-home.png`, `08-performance.png`, and `09-defect-detail.png` for responsive design, measured results, and source-linked region detail.
 
 ## Suggested skills/tags
 

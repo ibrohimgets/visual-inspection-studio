@@ -125,7 +125,7 @@ try {
   await client.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await wait(1_000);
   await evaluate("window.scrollTo(0, 0)");
-  const outputs = [await capture("cover.png")];
+  const outputs = [await capture("site-home.png")];
   await evaluate("[...document.querySelectorAll('.premium-button')].find(button => button.textContent.includes('Try Demo')).click()");
   await waitForText("Approve & activate policy");
   await evaluate("window.scrollTo(0, document.querySelector('.workspace-tabs').offsetTop - 12)");
